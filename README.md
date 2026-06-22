@@ -59,20 +59,30 @@ npx serve .
 
 ---
 
-## APK로 감싸기 (2단계)
+## APK 만들기 (GitHub Actions — PC 설정 불필요)
 
-핵심은 이 웹앱입니다. 같은 코드를 [Capacitor](https://capacitorjs.com/)로 감싸면 APK가 됩니다.
+이 저장소에는 **GitHub에서 APK를 자동으로 빌드하는 워크플로**가 들어 있습니다
+(`.github/workflows/android.yml`). 안드로이드 스튜디오나 PC 설정 없이 GitHub에서 바로 받습니다.
+
+1. GitHub 저장소 → **Actions** 탭 → **Build Android APK** 선택
+2. 이 브랜치로 푸시하면 자동 실행되며, **Run workflow** 버튼으로 수동 실행도 가능
+3. 빌드가 끝나면(초록 체크) 실행 페이지 하단 **Artifacts → `chaekgalpi-debug-apk`** 를 내려받기
+4. 압축을 풀면 `app-debug.apk` → 폰으로 옮겨 설치
+   - 설치 시 안드로이드의 **"출처를 알 수 없는 앱 설치 허용"** 을 켜야 합니다(디버그 서명 APK).
+
+> 동작 원리: 워크플로가 웹 자산을 `www/`로 모으고 → [Capacitor](https://capacitorjs.com/)로
+> 안드로이드 프로젝트를 생성한 뒤 → Gradle로 디버그 APK를 빌드합니다.
+> 안드로이드 WebView에는 File System Access API가 없어, 본문 TXT는 "폴백 저장" 경로로 동작합니다.
+
+### 로컬에서 직접 빌드하려면
 
 ```bash
-npm init -y
-npm i @capacitor/core @capacitor/cli @capacitor/android
-npx cap init "책갈피" "com.example.chaekgalpi" --web-dir .
+npm install
+npm run build:www
 npx cap add android
-npx cap copy
-npx cap open android   # Android Studio에서 빌드
+npx cap sync android
+cd android && ./gradlew assembleDebug   # → app/build/outputs/apk/debug/app-debug.apk
 ```
-
-> 모바일에서 File System Access API가 제한되면 위의 "본문 폴백 저장" 경로로 동작합니다.
 
 ---
 

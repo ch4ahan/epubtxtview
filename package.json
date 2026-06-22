@@ -1,0 +1,18 @@
+{
+  "name": "chaekgalpi",
+  "version": "1.0.0",
+  "private": true,
+  "description": "책갈피 — 개인용 소설 텍스트 뷰어 (Capacitor APK 래퍼)",
+  "scripts": {
+    "build:www": "node scripts/build-www.mjs",
+    "android:add": "cap add android",
+    "sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/core": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0"
+  }
+}

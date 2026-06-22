@@ -1,0 +1,61 @@
+name: Build Android APK
+
+# 웹앱(책갈피)을 Capacitor로 감싸 안드로이드 APK(디버그)를 빌드한다.
+# 완료되면 Actions 실행 페이지의 "Artifacts"에서 APK를 내려받아 폰에 설치할 수 있다.
+# (설치 시 "출처를 알 수 없는 앱 설치 허용" 필요)
+
+on:
+  push:
+    branches: [claude/keen-gates-tdejzh]
+    paths-ignore:
+      - 'README.md'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Node 설치
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: JDK 17 설치
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Android SDK 설치
+        uses: android-actions/setup-android@v3
+
+      - name: 의존성 설치
+        run: npm install
+
+      - name: 웹 자산 모으기 (www/)
+        run: npm run build:www
+
+      - name: Android 플랫폼 생성
+        run: npx cap add android
+
+      - name: Capacitor 동기화
+        run: npx cap sync android
+
+      - name: gradlew 실행 권한
+        run: chmod +x android/gradlew
+
+      - name: 디버그 APK 빌드
+        run: cd android && ./gradlew assembleDebug --no-daemon
+
+      - name: APK 업로드 (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaekgalpi-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

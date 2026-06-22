@@ -1,0 +1,8 @@
+{
+  "appId": "com.chaekgalpi.app",
+  "appName": "책갈피",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  }
+}

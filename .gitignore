@@ -3,4 +3,6 @@ node_modules/
 Thumbs.db
 *.log
 dist/
+www/
 android/
+package-lock.json
