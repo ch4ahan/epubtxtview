@@ -14,9 +14,14 @@
   function uid() { return 'b_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7); }
 
   // 제목 → 차분한 텍스트 표지 (회색 네모 금지)
+  // 파스텔 표지 톤 [배경, 글자]
   const COVER_TONES = [
-    ['#3a3531', '#cabfae'], ['#34403f', '#bcd0cb'], ['#403438', '#d8c2c6'],
-    ['#2f3a44', '#bcccd6'], ['#423b2c', '#d6c8a8'],
+    ['#f6c6d4', '#7a3b4e'], // 핑크
+    ['#bfe1f5', '#345a73'], // 스카이
+    ['#d7ecb3', '#4d6b2e'], // 연두
+    ['#b6e7dc', '#2f6b5f'], // 청록
+    ['#d9cdf0', '#544478'], // 라벤더
+    ['#ffe0b8', '#8a5a25'], // 살구
   ];
   function textCoverDataURL(title) {
     const c = document.createElement('canvas');

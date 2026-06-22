@@ -2,24 +2,26 @@
    읽기 방해 금지가 최우선. 다크/세피아/라이트 모두 자연스럽게. */
 
 :root {
-  --accent: #8c7b66;       /* 유일한 포인트 컬러: 마른 흙빛 */
-  --radius: 14px;
+  --accent: #5bb6c9;        /* 포인트 컬러: 파스텔 청록 */
+  --accent2: #f3a8c0;       /* 보조 포인트: 파스텔 핑크 */
+  --accent3: #9ed0a6;       /* 보조 포인트: 연두 */
+  --radius: 16px;
   --tap: 48px;
   font-size: 16px;
 }
 
-/* 테마 변수 */
+/* 테마 변수 — 라이트 기본(흰 바탕·검은 글씨), 파스텔 톤 UI */
 body[data-theme="light"] {
-  --bg: #f7f6f3; --surface: #ffffff; --fg: #2b2722; --muted: #8a8378;
-  --line: #e6e2da; --reader-bg: #faf9f6; --reader-fg: #2b2722;
+  --bg: #f6fafb; --surface: #ffffff; --fg: #2a2f33; --muted: #8b97a0;
+  --line: #e7eef1; --reader-bg: #ffffff; --reader-fg: #16191c;
 }
 body[data-theme="sepia"] {
   --bg: #efe7d8; --surface: #f6efe2; --fg: #43392b; --muted: #9a8a72;
   --line: #ddd1bd; --reader-bg: #f3ead8; --reader-fg: #43392b;
 }
 body[data-theme="dark"] {
-  --bg: #1d1b18; --surface: #26231f; --fg: #e8e2d6; --muted: #8c857a;
-  --line: #36322b; --reader-bg: #1a1814; --reader-fg: #ddd6c8;
+  --bg: #181a1d; --surface: #22262b; --fg: #e8edf0; --muted: #8b969e;
+  --line: #2e343a; --reader-bg: #121417; --reader-fg: #e6eaed;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -42,7 +44,11 @@ body {
   gap: 8px; padding: 14px 16px; padding-top: max(14px, env(safe-area-inset-top));
   border-bottom: 1px solid var(--line); background: var(--surface);
 }
-.brand { font-size: 1.2rem; margin: 0; font-weight: 700; letter-spacing: .02em; }
+.brand {
+  font-size: 1.2rem; margin: 0; font-weight: 800; letter-spacing: .02em;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
 .top-actions { display: flex; align-items: center; gap: 6px; }
 .icon-btn {
   min-width: var(--tap); height: var(--tap); padding: 0 10px;
@@ -52,9 +58,13 @@ body {
 .icon-btn:hover { background: var(--bg); }
 .icon-btn.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .primary-btn {
-  height: var(--tap); padding: 0 16px; border: none; border-radius: 12px;
-  background: var(--accent); color: #fff; font-weight: 600; font-size: .95rem; cursor: pointer;
+  height: var(--tap); padding: 0 16px; border: none; border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
+  font-weight: 700; font-size: .95rem; cursor: pointer; box-shadow: 0 3px 10px rgba(91,182,201,.3);
 }
+
+/* 뷰어 로딩 표시 */
+.reader-loading { display: flex; height: 100%; align-items: center; justify-content: center; color: var(--muted); }
 .link-btn { background: none; border: none; color: var(--accent); cursor: pointer; padding: 4px 6px; font-size: .9rem; }
 
 /* ───────── 서재 ───────── */

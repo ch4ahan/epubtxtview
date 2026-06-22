@@ -2,10 +2,15 @@
 (function (global) {
   'use strict';
 
-  // ───────── 화면 전환 ─────────
+  // ───────── 화면 전환 (+ 뒤로가기 히스토리) ─────────
+  let popHandling = false;
   function showScreen(name) {
     document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
     document.getElementById('screen-' + name).classList.add('active');
+    // 안드로이드 하드웨어 뒤로가기로 서재까지 돌아올 수 있게 히스토리 스택을 쌓는다
+    if (!popHandling && name !== 'library') {
+      history.pushState({ screen: name }, '');
+    }
   }
 
   // ───────── 토스트 ─────────
@@ -135,8 +140,25 @@
     return false;
   }
 
+  // 뒤로가기(하드웨어/브라우저) → 뷰어·발췌 화면이면 서재로
+  function handleBack() {
+    popHandling = true;
+    if (Viewer.isActive()) Viewer.close();
+    else { showScreen('library'); Library.render(); }
+    popHandling = false;
+  }
+
   // ───────── 초기화 ─────────
   async function init() {
+    // 테마: 저장값 없으면 시스템 밝기(다크/라이트)를 따른다. 기본은 흰 바탕·검은 글씨.
+    const savedOpts = await DB.getSetting('readOpts', null);
+    document.body.dataset.theme = (savedOpts && savedOpts.theme)
+      ? savedOpts.theme
+      : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+
+    history.replaceState({ screen: 'library' }, '');
+    window.addEventListener('popstate', handleBack);
+
     await Library.loadPrefs();
     Library.init();
     Viewer.init();
