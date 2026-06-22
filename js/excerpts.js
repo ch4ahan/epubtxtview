@@ -17,10 +17,13 @@
   }
 
   async function render() {
-    const all = await DB.byIndex('highlights', 'bookId', curBook.id);
-    const list = all.filter((h) => (tab === 'unlinked' ? h.status === 'unlinked' : h.status !== 'unlinked'));
     const wrap = document.getElementById('excerpt-list');
     wrap.innerHTML = '';
+
+    if (tab === 'bookmarks') { return renderBookmarks(wrap); }
+
+    const all = await DB.byIndex('highlights', 'bookId', curBook.id);
+    const list = all.filter((h) => (tab === 'unlinked' ? h.status === 'unlinked' : h.status !== 'unlinked'));
 
     if (list.length === 0) {
       wrap.innerHTML = `<div class="empty-state"><p class="muted">${tab === 'unlinked' ? '미연결 발췌가 없어요.' : '아직 형광펜이 없어요.'}</p></div>`;
@@ -64,6 +67,36 @@
         const found = Highlights.locate(loaded.text, h.anchor);
         if (found) { h.start = found.start; h.end = found.end; h.status = 'linked'; await DB.put('highlights', h); App.toast('재연결됐어요'); render(); }
         else App.toast('본문에서 찾지 못했어요');
+      };
+      wrap.appendChild(card);
+    }
+  }
+
+  async function renderBookmarks(wrap) {
+    const list = (await DB.byIndex('bookmarks', 'bookId', curBook.id)).sort((a, b) => a.position - b.position);
+    if (list.length === 0) {
+      wrap.innerHTML = '<div class="empty-state"><p class="muted">아직 북마크가 없어요.</p></div>';
+      return;
+    }
+    for (const m of list) {
+      const card = document.createElement('div');
+      card.className = 'excerpt-card';
+      card.innerHTML = `
+        <div class="excerpt-quote" style="border-color:var(--accent)">🔖 ${escapeHtml(m.snippet || '')}</div>
+        <div class="excerpt-meta muted">
+          <span>${new Date(m.createdAt).toLocaleDateString('ko-KR')}</span>
+          <span class="excerpt-buttons">
+            <button class="link-btn card-one">카드로</button>
+            <button class="link-btn del-one">삭제</button>
+          </span>
+        </div>`;
+      card.querySelector('.card-one').onclick = async () => {
+        const blob = await Cards.render({ title: curBook.title, date: true, quote: m.snippet || '', note: '', palette: 'paper' });
+        Cards.download(blob, `북마크_${curBook.title}_${Date.now()}.png`);
+        App.toast('카드를 저장했어요');
+      };
+      card.querySelector('.del-one').onclick = async () => {
+        if (await App.confirm('삭제', '이 북마크를 삭제할까요?')) { await DB.del('bookmarks', m.id); render(); }
       };
       wrap.appendChild(card);
     }

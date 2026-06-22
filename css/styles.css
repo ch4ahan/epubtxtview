@@ -183,7 +183,9 @@ body {
 
 /* 목차 */
 .toc-list { display: flex; flex-direction: column; }
-.toc-item { text-align: left; padding: 13px 6px; background: none; border: none; border-bottom: 1px solid var(--line); color: var(--fg); cursor: pointer; }
+.toc-head { font-size: .8rem; font-weight: 700; color: var(--muted); padding: 12px 6px 4px; }
+.toc-item { text-align: left; padding: 13px 6px; background: none; border: none; border-bottom: 1px solid var(--line); color: var(--fg); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toc-item.bm { color: var(--accent); }
 
 /* ───────── 발췌 화면 ───────── */
 .excerpt-tabs { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--line); background: var(--surface); }

@@ -26,6 +26,7 @@
   let zones = null;      // 터치 영역 설정
   let menuVisible = false;
   let highlightsCache = [];
+  let bookmarksCache = [];
 
   const $page = () => document.getElementById('reader-page');
   const $touch = () => document.getElementById('touch-layer');
@@ -223,6 +224,41 @@
     const slider = document.getElementById('page-slider');
     slider.max = Math.max(1, totalPages - 1);
     slider.value = curPage;
+    const bm = document.getElementById('btn-bookmark');
+    if (bm) bm.classList.toggle('active', !!currentPageBookmark());
+  }
+
+  // ───────── 북마크 ─────────
+  function pageRange() {
+    const start = offsetOfPage(curPage);
+    const end = curPage + 1 < totalPages ? offsetOfPage(curPage + 1) : text.length + 1;
+    return { start, end };
+  }
+  function currentPageBookmark() {
+    const { start, end } = pageRange();
+    return bookmarksCache.find((b) => b.position >= start && b.position < end);
+  }
+  async function toggleBookmark() {
+    const existing = currentPageBookmark();
+    if (existing) {
+      await DB.del('bookmarks', existing.id);
+      App.toast('북마크를 뺐어요');
+    } else {
+      const pos = offsetOfPage(curPage);
+      const snippetEnd = Math.min(text.length, pos + 60);
+      const bm = {
+        id: 'm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+        bookId: book.id,
+        position: pos,
+        snippet: text.slice(pos, snippetEnd).replace(/\s+/g, ' ').trim(),
+        anchor: Highlights.makeAnchor(text, pos, snippetEnd),
+        createdAt: Date.now(),
+      };
+      await DB.put('bookmarks', bm);
+      App.toast('🔖 북마크를 더했어요');
+    }
+    bookmarksCache = await DB.byIndex('bookmarks', 'bookId', book.id);
+    updateMenu();
   }
 
   function toggleMenu(force) {
@@ -380,6 +416,25 @@
   function openTOC() {
     const body = document.createElement('div');
     body.className = 'toc-list';
+
+    if (bookmarksCache.length) {
+      const head = document.createElement('div');
+      head.className = 'toc-head';
+      head.textContent = '🔖 북마크';
+      body.appendChild(head);
+      bookmarksCache.slice().sort((a, b) => a.position - b.position).forEach((m) => {
+        const b = document.createElement('button');
+        b.className = 'toc-item bm';
+        b.textContent = m.snippet || '(북마크)';
+        b.onclick = () => { goToOffset(m.position); App.closeModal(); toggleMenu(false); };
+        body.appendChild(b);
+      });
+      const head2 = document.createElement('div');
+      head2.className = 'toc-head';
+      head2.textContent = '목차';
+      body.appendChild(head2);
+    }
+
     (book.chapters || []).forEach((ch) => {
       const b = document.createElement('button');
       b.className = 'toc-item';
@@ -387,7 +442,7 @@
       b.onclick = () => { goToOffset(ch.offset); App.closeModal(); toggleMenu(false); };
       body.appendChild(b);
     });
-    App.modal('목차', body, [{ label: '닫기' }]);
+    App.modal('목차 · 북마크', body, [{ label: '닫기' }]);
   }
 
   // ───────── 읽기 설정 ─────────
@@ -498,8 +553,9 @@
     // 최초 오픈일 기록
     if (!book.firstOpenedAt) book.firstOpenedAt = Date.now();
 
-    // 형광펜 로드 + (필요시) 재연결
+    // 형광펜·북마크 로드 + (필요시) 재연결
     highlightsCache = await DB.byIndex('highlights', 'bookId', book.id);
+    bookmarksCache = await DB.byIndex('bookmarks', 'bookId', book.id);
 
     $page().innerHTML = `<div class="reader-content">${buildContent()}</div>`;
     curPage = 0;
@@ -524,6 +580,7 @@
     bindTouch();
     document.getElementById('btn-reader-back').onclick = close;
     document.getElementById('btn-toc').onclick = openTOC;
+    document.getElementById('btn-bookmark').onclick = toggleBookmark;
     document.getElementById('btn-reader-settings').onclick = openSettings;
     document.getElementById('btn-highlight-mode').onclick = () => setHlMode(!hlMode);
     document.getElementById('page-slider').addEventListener('input', (e) => {
