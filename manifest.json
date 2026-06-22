@@ -1,0 +1,15 @@
+{
+  "name": "책갈피 — 소설 뷰어",
+  "short_name": "책갈피",
+  "description": "내 TXT 소설을 서재처럼 관리하고 페이지 넘김으로 읽는 개인용 뷰어",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#efe7d8",
+  "theme_color": "#2b2722",
+  "lang": "ko",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
