@@ -70,9 +70,14 @@ body {
 /* ───────── 서재 ───────── */
 .library { flex: 1; overflow-y: auto; padding: 16px; }
 .library.grid-view {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 18px 14px; align-content: start;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 16px 12px; align-content: start;
 }
+.library.gallery-view {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 12px 8px; align-content: start;
+}
+.library.gallery-view .book-title { font-size: .72rem; -webkit-line-clamp: 1; margin-top: 5px; }
 .book-card { cursor: pointer; }
 .cover-wrap { position: relative; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 14px rgba(0,0,0,.14); aspect-ratio: 3/4.4; }
 .cover { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -108,6 +113,7 @@ body {
   font-size: var(--fs, 20px); line-height: var(--lh, 1.8);
   text-align: justify; word-break: break-word;
   transition: none;
+  -webkit-user-select: text; user-select: text;   /* 길게 눌러 형광펜 선택 */
 }
 .reader-content .para { margin: 0 0 var(--pgap, 14px); }
 .reader-content .para.blank { margin: 0 0 calc(var(--pgap, 14px) + .4em); }
@@ -119,7 +125,8 @@ body {
   content: "🗒"; font-size: .6em; vertical-align: super; margin-left: 1px; opacity: .7;
 }
 
-.touch-layer { position: absolute; inset: 0; z-index: 5; }
+/* 페이지 넘김 탭은 reader-page에서 직접 처리. 이 레이어는 본문 선택을 막지 않도록 통과시킨다. */
+.touch-layer { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 
 .reader-menu {
   position: absolute; inset: 0; z-index: 10; pointer-events: none;
@@ -178,6 +185,9 @@ body {
 .settings-panel label { display: block; margin: 14px 0; font-size: .9rem; }
 .settings-panel label output { color: var(--accent); font-weight: 700; }
 .settings-panel input[type=range] { width: 100%; margin-top: 6px; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 14px; font-weight: 600; }
+.switch-row input { width: 22px; height: 22px; }
+.set-label { font-size: .82rem; color: var(--muted); font-weight: 700; margin: 14px 0 6px; }
 .theme-row { display: flex; gap: 8px; margin: 8px 0 4px; }
 .theme-row button { flex: 1; min-height: var(--tap); border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
 .theme-row button.sel { border-color: var(--accent); color: var(--accent); font-weight: 700; }

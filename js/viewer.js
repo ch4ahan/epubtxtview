@@ -26,7 +26,6 @@
   let paras = [];        // [{start(글로벌), left, el}] 현재 창 문단 위치
   let pageUnit = 0;      // 한 페이지 폭 + 간격
   let curPage = 0;       // 현재 창 내 페이지
-  let hlMode = false;
   let opts = null;
   let zones = null;
   let menuVisible = false;
@@ -34,7 +33,6 @@
   let bookmarksCache = [];
 
   const $page = () => document.getElementById('reader-page');
-  const $touch = () => document.getElementById('touch-layer');
   const $menu = () => document.getElementById('reader-menu');
   const content = () => $page().firstElementChild;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -127,7 +125,6 @@
     const w = windows[curWin];
     $page().innerHTML = `<div class="reader-content">${buildContent(w.start, w.end)}</div>`;
     layoutWindow(keepOffset);
-    bindMarkClicks();
   }
 
   function layoutWindow(keepOffset) {
@@ -286,38 +283,56 @@
     const row = fy < zones.rows[0] ? 0 : fy < zones.rows[1] ? 1 : 2;
     return zones.cells[row * 3 + col];
   }
-  function onTouchTap(e) {
-    if (hlMode) return;
-    const rect = $touch().getBoundingClientRect();
-    const x = (e.changedTouches ? e.changedTouches[0].clientX : e.clientX) - rect.left;
-    const y = (e.changedTouches ? e.changedTouches[0].clientY : e.clientY) - rect.top;
+  function topBandPx() { return Math.max(52, $page().clientHeight * 0.07); }
+  function hasSelection() {
+    const s = window.getSelection();
+    return s && !s.isCollapsed && s.rangeCount > 0 && String(s).trim().length > 0;
+  }
+  function onTap(x, y, rect) {
+    if (menuVisible) { toggleMenu(false); return; }     // 메뉴가 떠 있으면 탭으로 닫기
+    if (y < topBandPx()) { toggleMenu(true); return; }   // 최상단은 항상 툴바 열기
     const act = actionAt(x, y, rect.width, rect.height);
     if (act === 'next') nextPage();
     else if (act === 'prev') prevPage();
-    else if (act === 'menu') toggleMenu();
+    else toggleMenu();
   }
   let downX = 0, downY = 0, downT = 0;
   function bindTouch() {
-    const t = $touch();
+    const p = $page();
     const onDown = (e) => { const pt = e.changedTouches ? e.changedTouches[0] : e; downX = pt.clientX; downY = pt.clientY; downT = Date.now(); };
     const onUp = (e) => {
       const pt = e.changedTouches ? e.changedTouches[0] : e;
+      // 본문을 길게 눌러 선택했으면 페이지 이동 대신 형광펜
+      if (hasSelection()) { setTimeout(onSelectionHighlight, 10); return; }
+      // 기존 형광펜을 탭하면 편집
+      const markEl = e.target && e.target.closest ? e.target.closest('mark.hl') : null;
+      if (markEl) { const h = highlightsCache.find((x) => x.id === markEl.dataset.id); if (h) { openHighlightDialog(h.start, h.end, h); return; } }
       const dx = pt.clientX - downX, dy = pt.clientY - downY, dt = Date.now() - downT;
-      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { if (dx < 0) nextPage(); else prevPage(); return; }
-      if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && dt < 500) onTouchTap(e);
+      const rect = p.getBoundingClientRect();
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) { if (dx < 0) nextPage(); else prevPage(); return; }
+      if (Math.abs(dx) < 14 && Math.abs(dy) < 14 && dt < 600) onTap(pt.clientX - rect.left, pt.clientY - rect.top, rect);
     };
-    t.addEventListener('touchstart', onDown, { passive: true });
-    t.addEventListener('touchend', onUp, { passive: true });
-    t.addEventListener('mousedown', onDown);
-    t.addEventListener('mouseup', onUp);
+    p.addEventListener('touchstart', onDown, { passive: true });
+    p.addEventListener('touchend', onUp, { passive: true });
+    p.addEventListener('mousedown', onDown);
+    p.addEventListener('mouseup', onUp);
   }
 
-  // ───────── 형광펜 ─────────
-  function setHlMode(on) {
-    hlMode = on;
-    $touch().style.pointerEvents = on ? 'none' : 'auto';
-    document.getElementById('btn-highlight-mode').classList.toggle('active', on);
-    App.toast(on ? '🖊 형광펜 모드: 본문을 드래그해 선택하세요' : '읽기 모드');
+  // ───────── 형광펜 (길게 눌러 선택 → 바로 칠하기) ─────────
+  let defaultHlColor = HL_COLORS[0].id;
+  async function loadHlColor() { defaultHlColor = await DB.getSetting('hlColor', HL_COLORS[0].id); }
+  function openColorChooser() {
+    const body = document.createElement('div');
+    body.innerHTML = '<p class="muted">본문을 길게 눌러 문장을 선택하면 이 색으로 바로 칠해져요.</p><div class="hl-colors"></div>';
+    const wrap = body.querySelector('.hl-colors');
+    HL_COLORS.forEach((c) => {
+      const sw = document.createElement('button');
+      sw.className = 'hl-swatch' + (c.id === defaultHlColor ? ' sel' : '');
+      sw.style.background = c.color; sw.title = c.label;
+      sw.onclick = () => { defaultHlColor = c.id; DB.setSetting('hlColor', c.id); wrap.querySelectorAll('.hl-swatch').forEach((x) => x.classList.remove('sel')); sw.classList.add('sel'); };
+      wrap.appendChild(sw);
+    });
+    App.modal('형광펜 색', body, [{ label: '닫기' }]);
   }
   function pointToOffset(node, offsetInNode) {
     let el = node.nodeType === 3 ? node.parentNode : node;
@@ -331,7 +346,7 @@
   }
   async function onSelectionHighlight() {
     const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    if (!hasSelection()) return;
     const r = sel.getRangeAt(0);
     const a = pointToOffset(r.startContainer, r.startOffset);
     const b = pointToOffset(r.endContainer, r.endOffset);
@@ -339,7 +354,12 @@
     const s = Math.min(a, b), eo = Math.max(a, b);
     if (eo - s < 1) return;
     sel.removeAllRanges();
-    openHighlightDialog(s, eo);
+    // 바로 칠하기: 기본색으로 즉시 형광펜 생성 → 편집 다이얼로그(색/메모/삭제)
+    const h = { id: Highlights.uid(), bookId: book.id, color: defaultHlColor, note: '', anchor: Highlights.makeAnchor(text, s, eo), start: s, end: eo, status: 'linked', createdAt: Date.now() };
+    await DB.put('highlights', h);
+    highlightsCache.push(h);
+    renderWindow(curWin, globalTop());
+    openHighlightDialog(h.start, h.end, h);
   }
   function openHighlightDialog(start, end, existing) {
     const quote = text.slice(start, end);
@@ -349,7 +369,7 @@
       <div class="hl-colors"></div>
       <textarea class="hl-note" placeholder="메모 (선택)">${existing ? esc(existing.note || '') : ''}</textarea>`;
     const colorWrap = body.querySelector('.hl-colors');
-    let chosen = existing ? existing.color : HL_COLORS[0].id;
+    let chosen = existing ? existing.color : defaultHlColor;
     HL_COLORS.forEach((c) => {
       const sw = document.createElement('button');
       sw.className = 'hl-swatch' + (c.id === chosen ? ' sel' : '');
@@ -370,16 +390,6 @@
   async function reloadHighlights() {
     highlightsCache = await DB.byIndex('highlights', 'bookId', book.id);
     renderWindow(curWin, globalTop());
-  }
-  function bindMarkClicks() {
-    content().querySelectorAll('mark.hl').forEach((m) => {
-      m.addEventListener('click', (e) => {
-        if (!hlMode) return;
-        e.stopPropagation();
-        const h = highlightsCache.find((x) => x.id === m.dataset.id);
-        if (h) openHighlightDialog(h.start, h.end, h);
-      });
-    });
   }
 
   // ───────── 목차 ─────────
@@ -465,34 +475,40 @@
   }
 
   // ───────── 열기/닫기 ─────────
+  let openToken = 0;
   async function open(b) {
+    const token = ++openToken;
     book = b;
     await loadOpts();
+    await loadHlColor();
     App.showScreen('reader');
     document.getElementById('reader-title').textContent = b.title;
     $page().innerHTML = '<div class="reader-loading">불러오는 중…</div>';
 
-    const loaded = await App.loadBookText(b);
-    if (!loaded) { close(); return; }
+    let loaded;
+    try { loaded = await App.loadBookText(b); } catch (e) { loaded = null; }
+    if (token !== openToken) return;          // 그새 서재로 나갔으면 중단(멈춤 방지)
+    if (!loaded) { App.toast('본문을 불러오지 못했어요'); close(); return; }
     text = loaded.text;
 
     if (!book.chapters || !book.chapters.length) book.chapters = Chapters.detect(text);
     if (!book.firstOpenedAt) book.firstOpenedAt = Date.now();
     highlightsCache = await DB.byIndex('highlights', 'bookId', book.id);
     bookmarksCache = await DB.byIndex('bookmarks', 'bookId', book.id);
+    if (token !== openToken) return;
     buildWindows();
 
     const startOffset = book.readPosition || 0;
     renderWindow(windowOfOffset(startOffset), startOffset);
 
-    // 컨트롤이 있다는 걸 알 수 있도록 메뉴를 잠깐 보여줬다 닫는다
     toggleMenu(true);
-    setTimeout(() => { if (menuVisible) toggleMenu(false); }, 1600);
+    setTimeout(() => { if (menuVisible && isActive()) toggleMenu(false); }, 1600);
+    if (App.applyKeepAwake) App.applyKeepAwake();
   }
 
   function close() {
+    openToken++; // 진행 중인 open이 있으면 취소
     if (book) { persistPosition(); DB.put('books', book); }
-    setHlMode(false);
     toggleMenu(false);
     text = ''; windows = []; paras = [];
     App.showScreen('library');
@@ -508,7 +524,7 @@
     document.getElementById('btn-toc').onclick = openTOC;
     document.getElementById('btn-bookmark').onclick = toggleBookmark;
     document.getElementById('btn-reader-settings').onclick = openSettings;
-    document.getElementById('btn-highlight-mode').onclick = () => setHlMode(!hlMode);
+    document.getElementById('btn-highlight-mode').onclick = openColorChooser;
     document.getElementById('page-slider').addEventListener('change', (e) => {
       const off = Math.round((parseInt(e.target.value, 10) / 1000) * text.length);
       goToOffset(clamp(off, 0, text.length - 1));
@@ -517,9 +533,6 @@
       const ind = document.querySelector('.page-indicator');
       if (ind) ind.textContent = `${Math.round(parseInt(e.target.value, 10) / 10)}% 읽음`;
     });
-
-    document.addEventListener('mouseup', () => { if (hlMode && isActive()) setTimeout(onSelectionHighlight, 10); });
-    $page().addEventListener('touchend', () => { if (hlMode) setTimeout(onSelectionHighlight, 10); });
 
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && book) DB.put('books', book); });
     window.addEventListener('pagehide', () => { if (book) DB.put('books', book); });

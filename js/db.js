@@ -13,7 +13,7 @@
   'use strict';
 
   const DB_NAME = 'novel-viewer';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   let _db = null;
 
   function open() {
@@ -24,6 +24,10 @@
         const db = e.target.result;
         if (!db.objectStoreNames.contains('books')) {
           db.createObjectStore('books', { keyPath: 'id' });
+        }
+        // 본문 텍스트 전용 저장소 (책 메타와 분리 → 위치 저장이 가볍고 빠름, 재연결 불필요)
+        if (!db.objectStoreNames.contains('texts')) {
+          db.createObjectStore('texts', { keyPath: 'bookId' });
         }
         if (!db.objectStoreNames.contains('highlights')) {
           const s = db.createObjectStore('highlights', { keyPath: 'id' });

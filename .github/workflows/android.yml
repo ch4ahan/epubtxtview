@@ -44,6 +44,9 @@ jobs:
       - name: Android 플랫폼 생성
         run: npx cap add android
 
+      - name: AndroidManifest 패치 (TXT 열기 인텐트)
+        run: node scripts/patch-manifest.mjs
+
       - name: Capacitor 동기화
         run: npx cap sync android
 

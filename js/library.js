@@ -67,18 +67,21 @@
   }
 
   // ───────── 렌더 ─────────
+  const VIEW_CLASS = { grid: 'grid-view', gallery: 'gallery-view', list: 'list-view' };
   async function render() {
     books = await DB.all('books');
     const grid = document.getElementById('library-grid');
     const empty = document.getElementById('library-empty');
-    grid.className = 'library ' + (viewMode === 'grid' ? 'grid-view' : 'list-view');
+    grid.className = 'library ' + (VIEW_CLASS[viewMode] || 'grid-view');
     grid.innerHTML = '';
     empty.classList.toggle('hidden', books.length > 0);
 
     for (const b of sortBooks()) {
-      grid.appendChild(viewMode === 'grid' ? gridCard(b) : listRow(b));
+      grid.appendChild(viewMode === 'list' ? listRow(b) : gridCard(b));
     }
   }
+
+  function setViewMode(mode) { viewMode = mode; DB.setSetting('viewMode', mode); render(); }
 
   function coverSrc(b) {
     if (b._coverURL) return b._coverURL;
@@ -141,8 +144,8 @@
   }
 
   async function openBook(b) {
-    if (b.needsRelink || (!b.fileHandle && !b.cachedText)) {
-      const ok = await App.confirm('본문 다시 연결', `"${b.title}"의 본문 파일이 필요해요. 지금 선택할까요?`);
+    if (b.needsRelink && !b.hasText && !b.cachedText) {
+      const ok = await App.confirm('본문 다시 연결', `"${b.title}"의 본문이 없어요(백업 복원 등). 지금 파일을 선택할까요?`);
       if (ok) startRelink(b);
       return;
     }
@@ -226,6 +229,7 @@
     const ok = await App.confirm('삭제', `"${b.title}"을(를) 서재에서 지울까요?\n(형광펜·메모·읽기 기록도 함께 삭제됩니다. 원본 TXT 파일은 그대로 남습니다.)`);
     if (!ok) return;
     await DB.del('books', b.id);
+    await DB.del('texts', b.id);
     await DB.delByIndex('highlights', 'bookId', b.id);
     await DB.delByIndex('bookmarks', 'bookId', b.id);
     await DB.delByIndex('readlog', 'bookId', b.id);
@@ -240,11 +244,11 @@
       const { text, encoding } = Encoding.decode(buf);
       b.encoding = encoding;
       b.fileName = file.name;
-      if (handle) b.fileHandle = handle; else b.cachedText = text;
-      b.needsRelink = false;
+      if (handle) b.fileHandle = handle;
+      b.hasText = true; b.needsRelink = false;
       b.chapters = Chapters.detect(text);
-      // 형광펜 재연결
-      const res = await Highlights.relinkAll(b.id, text);
+      await App.saveBookText(b.id, text);
+      const res = await Highlights.relinkAll(b.id, text); // 형광펜 재연결
       await DB.put('books', b);
       await render();
       App.toast(`연결 완료 · 형광펜 ${res.linked}/${res.total} 자동 연결` + (res.needCheck ? `, ${res.needCheck}개 확인 필요` : ''));
@@ -253,30 +257,36 @@
   }
 
   // ───────── 새 책 추가 ─────────
-  async function addBookFromFile(file, handle) {
-    const buf = await file.arrayBuffer();
-    const { text, encoding } = Encoding.decode(buf);
-    const title = file.name.replace(/\.txt$/i, '');
+  function makeBook(title, text, encoding, fileName, size, handle) {
     const book = {
-      id: uid(),
-      title,
-      encoding,
-      fileName: file.name,
-      size: file.size,
+      id: uid(), title, encoding,
+      fileName: fileName || (title + '.txt'),
+      size: size || text.length,
       charCount: text.length,
       addedAt: Date.now(),
-      firstOpenedAt: null,
-      lastReadAt: null,
-      readPosition: 0,
-      progress: 0,
-      finished: false,
+      firstOpenedAt: null, lastReadAt: null,
+      readPosition: 0, progress: 0, finished: false,
+      hasText: true,
       chapters: Chapters.detect(text),
     };
     if (handle) book.fileHandle = handle;
-    else book.cachedText = text; // 핸들 미지원 환경 폴백
+    return book;
+  }
+  async function addBookFromFile(file, handle) {
+    const { text, encoding } = Encoding.decode(await file.arrayBuffer());
+    const title = file.name.replace(/\.txt$/i, '');
+    const book = makeBook(title, text, encoding, file.name, file.size, handle);
+    await App.saveBookText(book.id, text);  // 본문은 전용 저장소에 1회 저장
     await DB.put('books', book);
     await render();
     App.toast(`"${title}" 추가됨`);
+  }
+  // 파일 매니저 '열기' 등에서 텍스트로 직접 추가
+  async function addBookFromText(title, text) {
+    const book = makeBook(title, text, 'utf-8', title + '.txt', text.length, null);
+    await App.saveBookText(book.id, text);
+    await DB.put('books', book);
+    await render();
   }
 
   // ───────── 툴바 ─────────
@@ -285,8 +295,11 @@
       App.pickText((file, handle) => addBookFromFile(file, handle));
     };
     document.getElementById('btn-view-toggle').onclick = async () => {
-      viewMode = viewMode === 'grid' ? 'list' : 'grid';
+      const order = ['grid', 'gallery', 'list'];
+      const labels = { grid: '서재형', gallery: '갤러리형', list: '목록형' };
+      viewMode = order[(order.indexOf(viewMode) + 1) % order.length];
       await DB.setSetting('viewMode', viewMode);
+      App.toast('보기: ' + labels[viewMode]);
       render();
     };
     document.getElementById('btn-sort').onclick = () => {
@@ -326,5 +339,5 @@
     sortMode = await DB.getSetting('sortMode', 'recent');
   }
 
-  global.Library = { init, render, loadPrefs, addBookFromFile };
+  global.Library = { init, render, loadPrefs, addBookFromFile, addBookFromText, setViewMode };
 })(window);

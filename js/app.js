@@ -111,25 +111,42 @@
     document.getElementById('file-input-txt').click();
   }
 
-  // 책 본문 텍스트 로드: 핸들 → 캐시 → 없으면 null
+  // 책 본문 텍스트 로드: 전용 저장소(texts) → (구버전)cachedText 이관 → 핸들 → 없으면 null
   async function loadBookText(book) {
+    const row = await DB.get('texts', book.id);
+    if (row && row.text) return { text: row.text, source: 'store' };
+
+    // 구버전 데이터(cachedText)를 texts 저장소로 1회 이관
+    if (book.cachedText) {
+      const t = book.cachedText;
+      await DB.put('texts', { bookId: book.id, text: t });
+      delete book.cachedText; book.hasText = true; book.needsRelink = false;
+      await DB.put('books', book);
+      return { text: t, source: 'migrated' };
+    }
+
+    // 데스크톱 파일 핸들(있으면) → 읽어서 저장소에 보관
     if (book.fileHandle) {
       try {
         const perm = await ensurePermission(book.fileHandle);
         if (perm) {
           const file = await book.fileHandle.getFile();
-          const buf = await file.arrayBuffer();
-          const { text } = Encoding.decode(buf);
+          const { text } = Encoding.decode(await file.arrayBuffer());
+          await DB.put('texts', { bookId: book.id, text });
+          book.hasText = true; book.needsRelink = false; await DB.put('books', book);
           return { text, source: 'handle' };
         }
-      } catch (e) { /* 핸들 무효 → 폴백/재연결 */ }
+      } catch (e) { /* 무효 → 재연결 */ }
     }
-    if (book.cachedText) return { text: book.cachedText, source: 'cache' };
-    // 본문 없음 → 재연결 필요
+
     book.needsRelink = true;
     await DB.put('books', book);
-    toast('본문 파일을 다시 연결해야 해요');
     return null;
+  }
+
+  // 본문 저장(한 번만). 책 추가/재연결 시 호출.
+  async function saveBookText(bookId, text) {
+    await DB.put('texts', { bookId, text });
   }
 
   async function ensurePermission(handle) {
@@ -140,38 +157,127 @@
     return false;
   }
 
-  // 뒤로가기(하드웨어/브라우저) → 뷰어·발췌 화면이면 서재로
+  // ───────── 화면 깨우기(꺼짐 방지) ─────────
+  let wakeLock = null;
+  async function applyKeepAwake() {
+    const on = await DB.getSetting('keepAwake', false);
+    try {
+      if (on && 'wakeLock' in navigator) {
+        if (!wakeLock) wakeLock = await navigator.wakeLock.request('screen');
+      } else if (wakeLock) { await wakeLock.release(); wakeLock = null; }
+    } catch (e) { /* 미지원/거부 무시 */ }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') applyKeepAwake();
+    else wakeLock = null; // 백그라운드 가면 자동 해제됨
+  });
+
+  // ───────── 뒤로가기 ─────────
+  function isLibraryActive() { return document.getElementById('screen-library').classList.contains('active'); }
   function handleBack() {
     popHandling = true;
     if (Viewer.isActive()) Viewer.close();
-    else { showScreen('library'); Library.render(); }
+    else if (!isLibraryActive()) { showScreen('library'); Library.render(); }
     popHandling = false;
+  }
+  function setupHardwareBack() {
+    const Cap = window.Capacitor;
+    if (Cap && Cap.Plugins && Cap.Plugins.App) {
+      Cap.Plugins.App.addListener('backButton', () => {
+        if (!isLibraryActive()) handleBack();
+        else if (Cap.Plugins.App.exitApp) Cap.Plugins.App.exitApp();
+      });
+    }
+    window.addEventListener('popstate', handleBack); // 웹 브라우저용
+  }
+
+  // ───────── 파일 매니저에서 '책갈피로 열기' (실험적) ─────────
+  async function setupFileOpen() {
+    const Cap = window.Capacitor;
+    if (!Cap || !Cap.Plugins || !Cap.Plugins.App) return;
+    const App = Cap.Plugins.App;
+    try {
+      const launch = await App.getLaunchUrl();
+      if (launch && launch.url) importFromUri(launch.url);
+    } catch (e) { /* 무시 */ }
+    App.addListener('appUrlOpen', (data) => { if (data && data.url) importFromUri(data.url); });
+  }
+  async function importFromUri(uri) {
+    const Cap = window.Capacitor;
+    const FS = Cap && Cap.Plugins && Cap.Plugins.Filesystem;
+    if (!FS) return;
+    try {
+      const res = await FS.readFile({ path: uri }); // base64
+      const bin = atob(res.data);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const { text } = Encoding.decode(bytes.buffer);
+      let name = decodeURIComponent(uri.split('/').pop() || '가져온 소설').replace(/\.txt$/i, '');
+      await Library.addBookFromText(name, text);
+      toast(`"${name}"을(를) 가져왔어요`);
+    } catch (e) { toast('파일을 여는 데 실패했어요'); }
+  }
+
+  // ───────── 앱 설정 (메인 상단 '책갈피' 탭) ─────────
+  async function openAppSettings() {
+    const keepAwake = await DB.getSetting('keepAwake', false);
+    const viewMode = await DB.getSetting('viewMode', 'grid');
+    const theme = document.body.dataset.theme;
+    const body = document.createElement('div');
+    body.className = 'settings-panel';
+    body.innerHTML = `
+      <label class="switch-row">화면 꺼짐 방지
+        <input type="checkbox" id="set-awake" ${keepAwake ? 'checked' : ''}></label>
+      <div class="set-label">서재 보기</div>
+      <div class="theme-row" id="set-view">
+        <button data-v="grid">서재형</button>
+        <button data-v="gallery">갤러리형</button>
+        <button data-v="list">목록형</button>
+      </div>
+      <div class="set-label">테마</div>
+      <div class="theme-row" id="set-theme">
+        <button data-theme="light">라이트</button>
+        <button data-theme="sepia">세피아</button>
+        <button data-theme="dark">다크</button>
+      </div>
+      <p class="muted" style="margin-top:14px">글씨 크기·문단 간격·여백·터치 영역은 책을 펼친 뒤 ⚙(읽기 설정)에서 바꿀 수 있어요.</p>`;
+    body.querySelector('#set-awake').onchange = async (e) => { await DB.setSetting('keepAwake', e.target.checked); applyKeepAwake(); };
+    body.querySelectorAll('#set-view button').forEach((b) => {
+      b.classList.toggle('sel', b.dataset.v === viewMode);
+      b.onclick = async () => { await DB.setSetting('viewMode', b.dataset.v); body.querySelectorAll('#set-view button').forEach((x) => x.classList.toggle('sel', x === b)); Library.setViewMode(b.dataset.v); };
+    });
+    body.querySelectorAll('#set-theme button').forEach((b) => {
+      b.classList.toggle('sel', b.dataset.theme === theme);
+      b.onclick = async () => {
+        document.body.dataset.theme = b.dataset.theme;
+        const opts = await DB.getSetting('readOpts', {}); opts.theme = b.dataset.theme; await DB.setSetting('readOpts', opts);
+        body.querySelectorAll('#set-theme button').forEach((x) => x.classList.toggle('sel', x === b));
+      };
+    });
+    modal('설정', body, [{ label: '닫기' }]);
   }
 
   // ───────── 초기화 ─────────
   async function init() {
-    // 테마: 저장값 없으면 시스템 밝기(다크/라이트)를 따른다. 기본은 흰 바탕·검은 글씨.
     const savedOpts = await DB.getSetting('readOpts', null);
     document.body.dataset.theme = (savedOpts && savedOpts.theme)
       ? savedOpts.theme
       : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 
     history.replaceState({ screen: 'library' }, '');
-    window.addEventListener('popstate', handleBack);
+    setupHardwareBack();
 
     await Library.loadPrefs();
     Library.init();
     Viewer.init();
     Excerpts.init();
 
-    // TXT input 폴백 핸들러
     document.getElementById('file-input-txt').addEventListener('change', (e) => {
       const file = e.target.files[0];
       e.target.value = '';
       if (file && pendingTextCb) { const cb = pendingTextCb; pendingTextCb = null; cb(file, null); }
     });
 
-    // JSON 백업 불러오기
     document.getElementById('file-input-json').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       e.target.value = '';
@@ -183,15 +289,18 @@
       } catch (err) { toast('불러오기 실패: ' + err.message); }
     });
 
+    // 메인 상단 '책갈피' 누르면 설정
+    const brand = document.querySelector('#screen-library .brand');
+    if (brand) { brand.style.cursor = 'pointer'; brand.onclick = openAppSettings; }
+
     await Library.render();
     showScreen('library');
+    applyKeepAwake();
+    setupFileOpen();
 
-    // 서비스워커 (오프라인)
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    }
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
-  global.App = { showScreen, toast, modal, closeModal, confirm, prompt, pickText, loadBookText };
+  global.App = { showScreen, toast, modal, closeModal, confirm, prompt, pickText, loadBookText, saveBookText, applyKeepAwake, openAppSettings };
   document.addEventListener('DOMContentLoaded', init);
 })(window);
