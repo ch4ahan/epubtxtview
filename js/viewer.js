@@ -138,19 +138,23 @@
     const colH = p.clientHeight - opts.margin * 2;
     if (colW <= 0 || colH <= 0) { setTimeout(() => layoutWindow(keepOffset), 60); return; }
 
+    const gap = opts.margin * 2;
     c.style.columnWidth = colW + 'px';
-    c.style.columnGap = (opts.margin * 2) + 'px';
+    c.style.columnGap = gap + 'px';
+    c.style.columnFill = 'auto';   // 균등분배(balance) 금지 → 페이지 경계가 매번 동일하게 고정
     c.style.height = colH + 'px';
     c.style.width = colW + 'px';
-    pageUnit = colW + opts.margin * 2;
+    pageUnit = colW + gap;
 
-    winPages = Math.max(1, Math.round(c.scrollWidth / pageUnit));
+    // 열 개수 = (전체 폭 + 간격) / 페이지단위. (이상적으로 정확한 정수)
+    winPages = Math.max(1, Math.round((c.scrollWidth + gap) / pageUnit));
 
+    // 각 문단이 속한 페이지(열) 번호를 미리 계산해 둔다 (조회 시 일관성 보장)
     paras = [];
     const cr = c.getBoundingClientRect();
     c.querySelectorAll('.para').forEach((el) => {
-      const r = el.getBoundingClientRect();
-      paras.push({ start: parseInt(el.dataset.start, 10), left: r.left - cr.left });
+      const left = el.getBoundingClientRect().left - cr.left;
+      paras.push({ start: parseInt(el.dataset.start, 10), page: clamp(Math.round(left / pageUnit), 0, winPages - 1) });
     });
 
     const w = windows[curWin];
@@ -170,12 +174,11 @@
   function pageOfOffset(globalOffset) {
     let target = paras[0];
     for (const pr of paras) { if (pr.start <= globalOffset) target = pr; else break; }
-    if (!target) return 0;
-    return clamp(Math.round(target.left / pageUnit), 0, winPages - 1);
+    return target ? target.page : 0;
   }
   function offsetOfPage(page) {
     let best = windows[curWin].start;
-    for (const pr of paras) { if (Math.round(pr.left / pageUnit) <= page) best = pr.start; else break; }
+    for (const pr of paras) { if (pr.page <= page) best = pr.start; else break; }
     return best;
   }
   function globalTop() { return offsetOfPage(curPage); }

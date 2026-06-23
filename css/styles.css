@@ -113,7 +113,8 @@ body {
   font-size: var(--fs, 20px); line-height: var(--lh, 1.8);
   text-align: justify; word-break: break-word;
   transition: none;
-  -webkit-user-select: text; user-select: text;   /* 길게 눌러 형광펜 선택 */
+  column-fill: auto;                                /* 페이지 경계 고정 */
+  -webkit-user-select: text; user-select: text;     /* 길게 눌러 형광펜 선택 */
 }
 .reader-content .para { margin: 0 0 var(--pgap, 14px); }
 .reader-content .para.blank { margin: 0 0 calc(var(--pgap, 14px) + .4em); }
