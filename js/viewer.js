@@ -414,6 +414,64 @@
     App.modal('목차 · 북마크', body, [{ label: '닫기' }]);
   }
 
+  // ───────── 본문 검색 ─────────
+  function chapterOf(offset) {
+    let t = '';
+    for (const ch of (book.chapters || [])) { if (ch.offset <= offset) t = ch.title; else break; }
+    return t;
+  }
+  function flashParaAt(offset) {
+    setTimeout(() => {
+      const els = content().querySelectorAll('.para');
+      let target = null;
+      els.forEach((el) => { if (parseInt(el.dataset.start, 10) <= offset) target = el; });
+      if (target) { target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1900); }
+    }, 90);
+  }
+  function openSearch() {
+    const body = document.createElement('div');
+    body.className = 'search-panel';
+    body.innerHTML = `
+      <input class="prompt-input" id="search-q" placeholder="본문에서 검색…" inputmode="search" autocomplete="off">
+      <div class="search-count muted" id="search-count">단어를 입력하면 본문에서 찾아요</div>
+      <div class="search-results" id="search-results"></div>`;
+    const q = body.querySelector('#search-q');
+    const results = body.querySelector('#search-results');
+    const countEl = body.querySelector('#search-count');
+    let timer = null;
+
+    function run() {
+      const term = q.value.trim();
+      results.innerHTML = '';
+      if (term.length < 1) { countEl.textContent = '단어를 입력하면 본문에서 찾아요'; return; }
+      const lower = text.toLowerCase();
+      const t = term.toLowerCase();
+      const hits = [];
+      let i = lower.indexOf(t);
+      while (i !== -1 && hits.length < 300) { hits.push(i); i = lower.indexOf(t, i + t.length); }
+      countEl.textContent = hits.length ? `${hits.length}곳 찾음${hits.length >= 300 ? ' (상위 300곳)' : ''}` : '결과가 없어요';
+      const frag = document.createDocumentFragment();
+      for (const pos of hits) {
+        const s = Math.max(0, pos - 18), e = Math.min(text.length, pos + term.length + 34);
+        const before = esc(text.slice(s, pos)).replace(/\n/g, ' ');
+        const mid = esc(text.slice(pos, pos + term.length));
+        const after = esc(text.slice(pos + term.length, e)).replace(/\n/g, ' ');
+        const ch = chapterOf(pos);
+        const pct = Math.round((pos / text.length) * 100);
+        const item = document.createElement('button');
+        item.className = 'search-item';
+        item.innerHTML = `<div class="search-meta">${ch ? esc(ch) + ' · ' : ''}${pct}%</div><div class="search-snip">${before}<mark>${mid}</mark>${after}</div>`;
+        item.onclick = () => { App.closeModal(); toggleMenu(false); goToOffset(pos); flashParaAt(pos); };
+        frag.appendChild(item);
+      }
+      results.appendChild(frag);
+    }
+    q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 180); });
+    q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(timer); run(); } });
+    App.modal('검색', body, [{ label: '닫기' }]);
+    setTimeout(() => q.focus(), 60);
+  }
+
   // ───────── 읽기 설정 ─────────
   function openSettings() {
     const body = document.createElement('div');
@@ -525,6 +583,7 @@
     bindTouch();
     document.getElementById('btn-reader-back').onclick = close;
     document.getElementById('btn-toc').onclick = openTOC;
+    document.getElementById('btn-search').onclick = openSearch;
     document.getElementById('btn-bookmark').onclick = toggleBookmark;
     document.getElementById('btn-reader-settings').onclick = openSettings;
     document.getElementById('btn-highlight-mode').onclick = openColorChooser;

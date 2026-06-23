@@ -202,6 +202,18 @@ body {
 .zone-cell.role-prev { background: #6a6f8c; }
 .zone-cell.role-menu { background: var(--accent); }
 
+/* 검색 */
+.search-panel { display: flex; flex-direction: column; }
+.search-count { margin: 8px 2px; font-size: .82rem; }
+.search-results { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+.search-item { text-align: left; padding: 11px 8px; background: none; border: none; border-bottom: 1px solid var(--line); color: var(--fg); cursor: pointer; }
+.search-meta { font-size: .72rem; color: var(--accent); font-weight: 700; margin-bottom: 3px; }
+.search-snip { font-size: .9rem; line-height: 1.5; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-snip mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--fg); border-radius: 3px; padding: 0 2px; }
+
+/* 검색·이동 시 해당 문단 잠깐 강조 */
+.reader-content .para.flash { background: color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 4px; transition: background .4s; }
+
 /* 목차 */
 .toc-list { display: flex; flex-direction: column; }
 .toc-head { font-size: .8rem; font-weight: 700; color: var(--muted); padding: 12px 6px 4px; }
