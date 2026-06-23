@@ -23,8 +23,8 @@
   let windows = [];      // [{start, end}] 본문을 나눈 창들
   let curWin = 0;        // 현재 창 인덱스
   let winPages = 1;      // 현재 창의 페이지 수
-  let paras = [];        // [{start(글로벌), left, el}] 현재 창 문단 위치
-  let pageUnit = 0;      // 한 페이지 폭 + 간격
+  let paras = [];        // [{start(글로벌), page}] 현재 창 문단의 페이지 위치
+  let pageTops = [0];    // 각 페이지의 세로 시작 위치(px)
   let curPage = 0;       // 현재 창 내 페이지
   let opts = null;
   let zones = null;
@@ -34,7 +34,7 @@
 
   const $page = () => document.getElementById('reader-page');
   const $menu = () => document.getElementById('reader-menu');
-  const content = () => $page().firstElementChild;
+  const content = () => $page().querySelector('.reader-content');
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   // ───────── 옵션/영역 기본값 ─────────
@@ -123,7 +123,7 @@
   function renderWindow(winIndex, keepOffset) {
     curWin = clamp(winIndex, 0, windows.length - 1);
     const w = windows[curWin];
-    $page().innerHTML = `<div class="reader-content">${buildContent(w.start, w.end)}</div>`;
+    $page().innerHTML = `<div class="reader-viewport"><div class="reader-content">${buildContent(w.start, w.end)}</div></div>`;
     layoutWindow(keepOffset);
   }
 
@@ -132,29 +132,37 @@
     applyStyleVars();
     const c = content();
     if (!c) return;
-    c.style.transform = 'translateX(0)';
+    c.style.transform = 'translateY(0)';
 
-    const colW = p.clientWidth - opts.margin * 2;
+    const availW = p.clientWidth - opts.margin * 2;
     const colH = p.clientHeight - opts.margin * 2;
-    if (colW <= 0 || colH <= 0) { setTimeout(() => layoutWindow(keepOffset), 60); return; }
+    if (availW <= 0 || colH <= 0) { setTimeout(() => layoutWindow(keepOffset), 60); return; }
+    c.style.width = availW + 'px';
 
-    const gap = opts.margin * 2;
-    c.style.columnWidth = colW + 'px';
-    c.style.columnGap = gap + 'px';
-    c.style.columnFill = 'auto';   // 균등분배(balance) 금지 → 페이지 경계가 매번 동일하게 고정
-    c.style.height = colH + 'px';
-    c.style.width = colW + 'px';
-    pageUnit = colW + gap;
+    // 페이지 분할: 세로로 쌓인 문단을 '한 화면 높이(colH)' 안에 들어가도록 묶는다.
+    // 페이지 경계는 항상 '문단 사이'에만 생기므로 글줄이 잘리지 않는다.
+    const els = c.querySelectorAll('.para');
+    pageTops = [0];
+    let curTop = 0;
+    els.forEach((el) => {
+      const top = el.offsetTop;
+      const bottom = top + el.offsetHeight;
+      if (bottom - curTop > colH + 1) {
+        let newTop = top > curTop ? top : curTop + colH; // 한 문단이 화면보다 크면 강제로 끊음
+        pageTops.push(newTop);
+        curTop = newTop;
+        while (bottom - curTop > colH + 1) { curTop += colH; pageTops.push(curTop); }
+      }
+    });
+    winPages = pageTops.length;
 
-    // 열 개수 = (전체 폭 + 간격) / 페이지단위. (이상적으로 정확한 정수)
-    winPages = Math.max(1, Math.round((c.scrollWidth + gap) / pageUnit));
-
-    // 각 문단이 속한 페이지(열) 번호를 미리 계산해 둔다 (조회 시 일관성 보장)
+    // 각 문단이 속한 페이지를 미리 계산
     paras = [];
-    const cr = c.getBoundingClientRect();
-    c.querySelectorAll('.para').forEach((el) => {
-      const left = el.getBoundingClientRect().left - cr.left;
-      paras.push({ start: parseInt(el.dataset.start, 10), page: clamp(Math.round(left / pageUnit), 0, winPages - 1) });
+    els.forEach((el) => {
+      const top = el.offsetTop;
+      let pg = 0;
+      for (let k = 0; k < pageTops.length; k++) { if (pageTops[k] <= top + 0.5) pg = k; else break; }
+      paras.push({ start: parseInt(el.dataset.start, 10), page: pg });
     });
 
     const w = windows[curWin];
@@ -168,7 +176,7 @@
 
   function applyTransform() {
     const c = content();
-    if (c) c.style.transform = `translateX(${-curPage * pageUnit}px)`;
+    if (c) c.style.transform = `translateY(${-(pageTops[curPage] || 0)}px)`;
   }
 
   function pageOfOffset(globalOffset) {
@@ -177,8 +185,9 @@
     return target ? target.page : 0;
   }
   function offsetOfPage(page) {
+    for (const pr of paras) { if (pr.page === page) return pr.start; } // 그 페이지 맨 위 문단
     let best = windows[curWin].start;
-    for (const pr of paras) { if (pr.page <= page) best = pr.start; else break; }
+    for (const pr of paras) { if (pr.page < page) best = pr.start; else break; }
     return best;
   }
   function globalTop() { return offsetOfPage(curPage); }
@@ -356,13 +365,15 @@
     if (a == null || b == null) return;
     const s = Math.min(a, b), eo = Math.max(a, b);
     if (eo - s < 1) return;
-    sel.removeAllRanges();
-    // 바로 칠하기: 기본색으로 즉시 형광펜 생성 → 편집 다이얼로그(색/메모/삭제)
+    // 같은 구간이 이미 칠해져 있으면 중복 생성 금지
+    if (highlightsCache.some((x) => x.status === 'linked' && x.start === s && x.end === eo)) { sel.removeAllRanges(); return; }
+    sel.removeAllRanges();   // 선택 해제 → 안드로이드 기본 선택 메뉴도 사라짐
+    // 바로 칠하기: 기본색으로 즉시 형광펜 생성 (색·메모 수정은 형광펜을 탭)
     const h = { id: Highlights.uid(), bookId: book.id, color: defaultHlColor, note: '', anchor: Highlights.makeAnchor(text, s, eo), start: s, end: eo, status: 'linked', createdAt: Date.now() };
     await DB.put('highlights', h);
     highlightsCache.push(h);
     renderWindow(curWin, globalTop());
-    openHighlightDialog(h.start, h.end, h);
+    App.toast('형광펜 칠함 · 탭하면 색/메모 편집');
   }
   function openHighlightDialog(start, end, existing) {
     const quote = text.slice(start, end);
@@ -594,6 +605,14 @@
     document.getElementById('page-slider').addEventListener('input', (e) => {
       const ind = document.querySelector('.page-indicator');
       if (ind) ind.textContent = `${Math.round(parseInt(e.target.value, 10) / 10)}% 읽음`;
+    });
+
+    // 길게 눌러 텍스트를 선택하면(안드로이드 기본 선택 메뉴가 떠도) 잠시 후 자동으로 형광펜 적용
+    let selTimer = null;
+    document.addEventListener('selectionchange', () => {
+      if (!isActive()) return;
+      clearTimeout(selTimer);
+      selTimer = setTimeout(() => { if (hasSelection()) onSelectionHighlight(); }, 450);
     });
 
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && book) DB.put('books', book); });

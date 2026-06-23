@@ -108,12 +108,13 @@ body {
   flex: 1; overflow: hidden; position: relative;
   padding: var(--mg, 22px); color: var(--reader-fg); background: var(--reader-bg);
 }
+/* 패딩(여백) 안쪽의 실제 보이는 영역. 여기서 잘라내므로 여백으로 글이 새지 않는다. */
+.reader-viewport { height: 100%; overflow: hidden; position: relative; }
 .reader-content {
   font-family: "Noto Serif KR", serif;
   font-size: var(--fs, 20px); line-height: var(--lh, 1.8);
   text-align: justify; word-break: break-word;
-  transition: none;
-  column-fill: auto;                                /* 페이지 경계 고정 */
+  transition: none; position: relative; will-change: transform;
   -webkit-user-select: text; user-select: text;     /* 길게 눌러 형광펜 선택 */
 }
 .reader-content .para { margin: 0 0 var(--pgap, 14px); }
