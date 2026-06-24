@@ -25,6 +25,8 @@
   let winPages = 1;      // 현재 창의 페이지 수
   let paras = [];        // [{start(글로벌), page}] 현재 창 문단의 페이지 위치
   let pageTops = [0];    // 각 페이지의 세로 시작 위치(px)
+  let pageHeights = [];  // 각 페이지의 실제 높이(px) — 다음 페이지 문단이 새지 않게 뷰포트를 이 높이로 자른다
+  let colHpx = 0;        // 한 화면(컬럼) 높이
   let curPage = 0;       // 현재 창 내 페이지
   let opts = null;
   let zones = null;
@@ -87,7 +89,9 @@
     if (overlaps.length === 0) return esc(line);
     let html = '', cursor = rawStart;
     for (const h of overlaps) {
-      const s = Math.max(rawStart, h.start), e = Math.min(pEnd, h.end);
+      // cursor 아래로 내려가지 않게 고정 → 겹치는 형광펜이 있어도 본문이 중복 출력되지 않는다.
+      const s = Math.max(cursor, h.start), e = Math.min(pEnd, h.end);
+      if (e <= s) continue;
       if (s > cursor) html += esc(text.slice(cursor, s));
       const c = (HL_COLORS.find((x) => x.id === h.color) || HL_COLORS[0]).color;
       const noteMark = h.note ? ' data-note="1"' : '';
@@ -117,6 +121,7 @@
     p.style.setProperty('--lh', opts.lineHeight);
     p.style.setProperty('--pgap', opts.paraGap + 'px');
     p.style.setProperty('--mg', opts.margin + 'px');
+    p.style.setProperty('--hl-pct', hlAlpha + '%');
   }
 
   // ───────── 창 렌더 + 페이지 분할 ─────────
@@ -138,6 +143,7 @@
     const colH = p.clientHeight - opts.margin * 2;
     if (availW <= 0 || colH <= 0) { setTimeout(() => layoutWindow(keepOffset), 60); return; }
     c.style.width = availW + 'px';
+    colHpx = colH;
 
     // 페이지 분할: 세로로 쌓인 문단을 '한 화면 높이(colH)' 안에 들어가도록 묶는다.
     // 페이지 경계는 항상 '문단 사이'에만 생기므로 글줄이 잘리지 않는다.
@@ -155,6 +161,13 @@
       }
     });
     winPages = pageTops.length;
+
+    // 각 페이지의 실제 높이 = 다음 페이지 시작 - 이 페이지 시작 (마지막 페이지는 한 화면).
+    // 뷰포트를 이 높이로 잘라서, 다음 페이지 첫 문단이 현재 페이지 아래로 새어 나오지 않게 한다.
+    pageHeights = [];
+    for (let i = 0; i < pageTops.length; i++) {
+      pageHeights.push(i + 1 < pageTops.length ? pageTops[i + 1] - pageTops[i] : colH);
+    }
 
     // 각 문단이 속한 페이지를 미리 계산
     paras = [];
@@ -176,7 +189,11 @@
 
   function applyTransform() {
     const c = content();
-    if (c) c.style.transform = `translateY(${-(pageTops[curPage] || 0)}px)`;
+    if (!c) return;
+    c.style.transform = `translateY(${-(pageTops[curPage] || 0)}px)`;
+    // 현재 페이지 높이만큼만 보이도록 뷰포트를 자른다(다음 문단이 아래로 새는 '문단 잘림' 방지).
+    const vp = c.parentElement;
+    if (vp) vp.style.height = (pageHeights[curPage] || colHpx) + 'px';
   }
 
   function pageOfOffset(globalOffset) {
@@ -332,19 +349,44 @@
 
   // ───────── 형광펜 (길게 눌러 선택 → 바로 칠하기) ─────────
   let defaultHlColor = HL_COLORS[0].id;
-  async function loadHlColor() { defaultHlColor = await DB.getSetting('hlColor', HL_COLORS[0].id); }
+  let hlAlpha = 100; // 형광펜 진하기(%) — 100이면 불투명, 낮을수록 투명
+  async function loadHlColor() {
+    defaultHlColor = await DB.getSetting('hlColor', HL_COLORS[0].id);
+    hlAlpha = clamp(parseInt(await DB.getSetting('hlAlpha', 100), 10) || 100, 20, 100);
+  }
+  function applyHlAlpha() { $page().style.setProperty('--hl-pct', hlAlpha + '%'); }
+  function colorOf(id) { return (HL_COLORS.find((x) => x.id === id) || HL_COLORS[0]).color; }
   function openColorChooser() {
     const body = document.createElement('div');
-    body.innerHTML = '<p class="muted">본문을 길게 눌러 문장을 선택하면 이 색으로 바로 칠해져요.</p><div class="hl-colors"></div>';
+    body.innerHTML = `
+      <p class="muted">본문을 길게 눌러 문장을 선택하면 이 색으로 바로 칠해져요.</p>
+      <div class="hl-colors"></div>
+      <label class="hl-alpha-row">투명도(진하기) <output>${hlAlpha}%</output>
+        <input type="range" min="20" max="100" step="5" value="${hlAlpha}" id="hl-alpha"></label>
+      <div class="hl-preview" style="--hl:${colorOf(defaultHlColor)}; --hl-pct:${hlAlpha}%"><mark class="hl">미리보기 형광펜이에요</mark></div>`;
     const wrap = body.querySelector('.hl-colors');
+    const preview = body.querySelector('.hl-preview');
     HL_COLORS.forEach((c) => {
       const sw = document.createElement('button');
       sw.className = 'hl-swatch' + (c.id === defaultHlColor ? ' sel' : '');
       sw.style.background = c.color; sw.title = c.label;
-      sw.onclick = () => { defaultHlColor = c.id; DB.setSetting('hlColor', c.id); wrap.querySelectorAll('.hl-swatch').forEach((x) => x.classList.remove('sel')); sw.classList.add('sel'); };
+      sw.onclick = () => {
+        defaultHlColor = c.id; DB.setSetting('hlColor', c.id);
+        wrap.querySelectorAll('.hl-swatch').forEach((x) => x.classList.remove('sel')); sw.classList.add('sel');
+        preview.style.setProperty('--hl', c.color);
+      };
       wrap.appendChild(sw);
     });
-    App.modal('형광펜 색', body, [{ label: '닫기' }]);
+    const alphaInp = body.querySelector('#hl-alpha');
+    const alphaOut = body.querySelector('.hl-alpha-row output');
+    alphaInp.addEventListener('input', () => {
+      hlAlpha = parseInt(alphaInp.value, 10);
+      alphaOut.textContent = hlAlpha + '%';
+      preview.style.setProperty('--hl-pct', hlAlpha + '%');
+      applyHlAlpha();                 // 본문에 칠해진 형광펜도 즉시 반영
+      DB.setSetting('hlAlpha', hlAlpha);
+    });
+    App.modal('형광펜 색 · 투명도', body, [{ label: '닫기' }]);
   }
   function pointToOffset(node, offsetInNode) {
     let el = node.nodeType === 3 ? node.parentNode : node;
@@ -363,13 +405,23 @@
     const a = pointToOffset(r.startContainer, r.startOffset);
     const b = pointToOffset(r.endContainer, r.endOffset);
     if (a == null || b == null) return;
-    const s = Math.min(a, b), eo = Math.max(a, b);
+    let s = Math.min(a, b), eo = Math.max(a, b);
     if (eo - s < 1) return;
-    // 같은 구간이 이미 칠해져 있으면 중복 생성 금지
-    if (highlightsCache.some((x) => x.status === 'linked' && x.start === s && x.end === eo)) { sel.removeAllRanges(); return; }
+    // 겹치는 기존 형광펜이 있으면 새로 쌓지 않고 '하나로 합친다'.
+    //  - 드래그 도중 selectionchange가 여러 번 불려도 형광펜이 중복 생성되지 않는다(복사처럼 보이던 문제 해결).
+    //  - 손잡이를 끌어 범위를 넓히면 자연스럽게 확장된다.
+    const overlapping = highlightsCache.filter((x) => x.status === 'linked' && x.start < eo && x.end > s);
+    let color = defaultHlColor, note = '';
+    if (overlapping.length) {
+      // 이미 선택 구간을 완전히 덮는 형광펜이 있으면 아무것도 하지 않는다.
+      if (overlapping.some((o) => o.start <= s && o.end >= eo)) { sel.removeAllRanges(); return; }
+      for (const o of overlapping) { s = Math.min(s, o.start); eo = Math.max(eo, o.end); if (o.note) note = o.note; color = o.color; }
+      for (const o of overlapping) { await DB.del('highlights', o.id); }
+      highlightsCache = highlightsCache.filter((x) => !overlapping.includes(x));
+    }
     sel.removeAllRanges();   // 선택 해제 → 안드로이드 기본 선택 메뉴도 사라짐
     // 바로 칠하기: 기본색으로 즉시 형광펜 생성 (색·메모 수정은 형광펜을 탭)
-    const h = { id: Highlights.uid(), bookId: book.id, color: defaultHlColor, note: '', anchor: Highlights.makeAnchor(text, s, eo), start: s, end: eo, status: 'linked', createdAt: Date.now() };
+    const h = { id: Highlights.uid(), bookId: book.id, color, note, anchor: Highlights.makeAnchor(text, s, eo), start: s, end: eo, status: 'linked', createdAt: Date.now() };
     await DB.put('highlights', h);
     highlightsCache.push(h);
     renderWindow(curWin, globalTop());

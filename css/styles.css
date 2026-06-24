@@ -120,7 +120,8 @@ body {
 .reader-content .para { margin: 0 0 var(--pgap, 14px); }
 .reader-content .para.blank { margin: 0 0 calc(var(--pgap, 14px) + .4em); }
 .reader-content mark.hl {
-  background: var(--hl); color: inherit; border-radius: 3px;
+  background: color-mix(in srgb, var(--hl) var(--hl-pct, 100%), transparent);
+  color: inherit; border-radius: 3px;
   padding: 0 1px; box-decoration-break: clone; -webkit-box-decoration-break: clone;
 }
 .reader-content mark.hl[data-note]::after {
@@ -182,6 +183,12 @@ body {
 .hl-colors { display: flex; gap: 10px; margin: 14px 0 4px; }
 .hl-swatch { width: 40px; height: 40px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
 .hl-swatch.sel { border-color: var(--fg); transform: scale(1.08); }
+.hl-alpha-row { display: block; margin: 16px 0 4px; font-size: .9rem; }
+.hl-alpha-row output { color: var(--accent); font-weight: 700; }
+.hl-alpha-row input[type=range] { width: 100%; margin-top: 6px; }
+.hl-preview { margin-top: 10px; font-family: "Noto Serif KR", serif; font-size: 1.05rem; line-height: 1.8; }
+.hl-preview mark.hl { background: color-mix(in srgb, var(--hl, #f6c6d4) var(--hl-pct, 100%), transparent);
+  color: var(--fg); border-radius: 3px; padding: 1px 2px; }
 
 /* 설정 패널 */
 .settings-panel label { display: block; margin: 14px 0; font-size: .9rem; }
