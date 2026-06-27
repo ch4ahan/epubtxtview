@@ -121,8 +121,9 @@ body {
 .reader-content .para.blank { margin: 0 0 calc(var(--pgap, 14px) + .4em); }
 .reader-content mark.hl {
   background: color-mix(in srgb, var(--hl) var(--hl-pct, 100%), transparent);
-  color: inherit; border-radius: 3px;
-  padding: 0 1px; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  color: inherit; border-radius: 2px;
+  /* 가로 padding을 두면 글자 위치·자간이 밀려 '글씨체가 바뀐 듯' 보였다 → 0으로 두어 본문과 똑같이. */
+  padding: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone;
 }
 .reader-content mark.hl[data-note]::after {
   content: "🗒"; font-size: .6em; vertical-align: super; margin-left: 1px; opacity: .7;
@@ -189,6 +190,31 @@ body {
 .hl-preview { margin-top: 10px; font-family: "Noto Serif KR", serif; font-size: 1.05rem; line-height: 1.8; }
 .hl-preview mark.hl { background: color-mix(in srgb, var(--hl, #f6c6d4) var(--hl-pct, 100%), transparent);
   color: var(--fg); border-radius: 3px; padding: 1px 2px; }
+
+/* 형광펜 범위 조절 */
+.hl-adjust-row { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.hl-adjust-row .muted { font-size: .82rem; display: block; margin-bottom: 8px; }
+.hl-adjust-btns { display: flex; gap: 8px; }
+.hl-adjust-btn { flex: 1; min-height: var(--tap); border-radius: 12px; border: 1px solid var(--accent); background: var(--bg); color: var(--accent); font-weight: 600; cursor: pointer; }
+
+/* 범위 조절 중 상단 안내 띠 */
+.adjust-banner {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; padding-bottom: max(10px, env(safe-area-inset-bottom));
+  background: var(--accent); color: #fff; box-shadow: 0 -2px 12px rgba(0,0,0,.28);
+}
+.adjust-banner .ab-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.adjust-banner .ab-edge {
+  border: 1px solid rgba(255,255,255,.6); background: transparent; color: #fff;
+  font-weight: 700; font-size: .82rem; padding: 6px 10px; border-radius: 16px; cursor: pointer;
+}
+.adjust-banner .ab-edge.on { background: #fff; color: var(--accent); }
+.adjust-banner .ab-hint { font-size: .74rem; opacity: .92; }
+.adjust-banner .ab-done {
+  border: none; background: rgba(255,255,255,.24); color: #fff; font-weight: 700;
+  padding: 8px 16px; border-radius: 12px; cursor: pointer; flex-shrink: 0;
+}
 
 /* 설정 패널 */
 .settings-panel label { display: block; margin: 14px 0; font-size: .9rem; }

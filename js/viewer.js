@@ -331,6 +331,13 @@
     const onDown = (e) => { const pt = e.changedTouches ? e.changedTouches[0] : e; downX = pt.clientX; downY = pt.clientY; downT = Date.now(); };
     const onUp = (e) => {
       const pt = e.changedTouches ? e.changedTouches[0] : e;
+      // 형광펜 범위 조절 모드: 탭하면 시작/끝점을 그 위치로 옮기고, 좌우로 넘기면 페이지 이동.
+      if (adjustHl) {
+        const adx = pt.clientX - downX, ady = pt.clientY - downY;
+        if (Math.abs(adx) > 50 && Math.abs(adx) > Math.abs(ady) * 1.5) { if (adx < 0) nextPage(); else prevPage(); return; }
+        if (Math.abs(adx) < 16 && Math.abs(ady) < 16) applyAdjustAt(pt.clientX, pt.clientY);
+        return;
+      }
       // 본문을 길게 눌러 선택했으면 페이지 이동 대신 형광펜
       if (hasSelection()) { setTimeout(onSelectionHighlight, 10); return; }
       // 기존 형광펜을 탭하면 편집
@@ -350,6 +357,7 @@
   // ───────── 형광펜 (길게 눌러 선택 → 바로 칠하기) ─────────
   let defaultHlColor = HL_COLORS[0].id;
   let hlAlpha = 100; // 형광펜 진하기(%) — 100이면 불투명, 낮을수록 투명
+  let adjustHl = null; // 형광펜 범위 조절 중: { id, edge: 'start'|'end' }
   async function loadHlColor() {
     defaultHlColor = await DB.getSetting('hlColor', HL_COLORS[0].id);
     hlAlpha = clamp(parseInt(await DB.getSetting('hlAlpha', 100), 10) || 100, 20, 100);
@@ -399,6 +407,7 @@
     return base + range.toString().length;
   }
   async function onSelectionHighlight() {
+    if (adjustHl) return;            // 범위 조절 중에는 새 형광펜을 만들지 않는다
     const sel = window.getSelection();
     if (!hasSelection()) return;
     const r = sel.getRangeAt(0);
@@ -433,7 +442,14 @@
     body.innerHTML = `
       <div class="hl-quote">${esc(quote.slice(0, 200))}${quote.length > 200 ? '…' : ''}</div>
       <div class="hl-colors"></div>
-      <textarea class="hl-note" placeholder="메모 (선택)">${existing ? esc(existing.note || '') : ''}</textarea>`;
+      <textarea class="hl-note" placeholder="메모 (선택)">${existing ? esc(existing.note || '') : ''}</textarea>
+      ${existing ? `<div class="hl-adjust-row">
+        <span class="muted">범위 조절 (다음 페이지까지 이어 칠하기)</span>
+        <div class="hl-adjust-btns">
+          <button type="button" class="hl-adjust-btn" data-edge="start">⟵ 시작점 옮기기</button>
+          <button type="button" class="hl-adjust-btn" data-edge="end">끝점 옮기기 ⟶</button>
+        </div></div>` : ''}`;
+    if (existing) body.querySelectorAll('.hl-adjust-btn').forEach((b) => b.onclick = () => { App.closeModal(); startAdjust(existing, b.dataset.edge); });
     const colorWrap = body.querySelector('.hl-colors');
     let chosen = existing ? existing.color : defaultHlColor;
     HL_COLORS.forEach((c) => {
@@ -455,6 +471,64 @@
   }
   async function reloadHighlights() {
     highlightsCache = await DB.byIndex('highlights', 'bookId', book.id);
+    renderWindow(curWin, globalTop());
+  }
+
+  // ───────── 형광펜 범위 조절 (시작/끝점을 탭으로 옮김 · 다음 페이지까지 이어 칠하기) ─────────
+  function startAdjust(h, edge) {
+    adjustHl = { id: h.id, edge };
+    const sel = window.getSelection(); if (sel) sel.removeAllRanges();
+    toggleMenu(false);
+    showAdjustBanner();
+  }
+  function endAdjust() {
+    adjustHl = null;
+    const el = document.getElementById('adjust-banner');
+    if (el) el.classList.add('hidden');
+  }
+  function showAdjustBanner() {
+    let el = document.getElementById('adjust-banner');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'adjust-banner'; el.className = 'adjust-banner';
+      document.getElementById('screen-reader').appendChild(el);
+    }
+    el.classList.remove('hidden');
+    el.innerHTML = `
+      <div class="ab-left">
+        <button class="ab-edge${adjustHl.edge === 'start' ? ' on' : ''}" data-edge="start">시작점</button>
+        <button class="ab-edge${adjustHl.edge === 'end' ? ' on' : ''}" data-edge="end">끝점</button>
+        <span class="ab-hint">옮길 위치를 탭 · 좌우로 넘겨 다음 페이지</span>
+      </div>
+      <button class="ab-done" id="adjust-done">완료</button>`;
+    el.querySelectorAll('.ab-edge').forEach((b) => b.onclick = () => {
+      if (!adjustHl) return;
+      adjustHl.edge = b.dataset.edge;
+      el.querySelectorAll('.ab-edge').forEach((x) => x.classList.toggle('on', x === b));
+    });
+    el.querySelector('#adjust-done').onclick = endAdjust;
+  }
+  function caretOffsetAt(clientX, clientY) {
+    let range = null;
+    if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(clientX, clientY);
+    else if (document.caretPositionFromPoint) {
+      const c = document.caretPositionFromPoint(clientX, clientY);
+      if (c) { range = document.createRange(); range.setStart(c.offsetNode, c.offset); }
+    }
+    if (!range) return null;
+    return pointToOffset(range.startContainer, range.startOffset);
+  }
+  async function applyAdjustAt(clientX, clientY) {
+    if (!adjustHl) return;
+    const h = highlightsCache.find((x) => x.id === adjustHl.id);
+    if (!h) { endAdjust(); return; }
+    const off = caretOffsetAt(clientX, clientY);
+    if (off == null) return;
+    if (adjustHl.edge === 'start') h.start = clamp(off, 0, h.end - 1);
+    else h.end = clamp(off, h.start + 1, text.length);
+    h.anchor = Highlights.makeAnchor(text, h.start, h.end); // 새 범위로 앵커 갱신(파일 바뀌어도 재연결되게)
+    h.approx = false;
+    await DB.put('highlights', h);
     renderWindow(curWin, globalTop());
   }
 
@@ -632,6 +706,7 @@
 
   function close() {
     openToken++; // 진행 중인 open이 있으면 취소
+    endAdjust();
     if (book) { persistPosition(); DB.put('books', book); }
     toggleMenu(false);
     text = ''; windows = []; paras = [];
