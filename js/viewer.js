@@ -331,13 +331,9 @@
     const onDown = (e) => { const pt = e.changedTouches ? e.changedTouches[0] : e; downX = pt.clientX; downY = pt.clientY; downT = Date.now(); };
     const onUp = (e) => {
       const pt = e.changedTouches ? e.changedTouches[0] : e;
-      // 형광펜 범위 조절 모드: 탭하면 시작/끝점을 그 위치로 옮기고, 좌우로 넘기면 페이지 이동.
-      if (adjustHl) {
-        const adx = pt.clientX - downX, ady = pt.clientY - downY;
-        if (Math.abs(adx) > 50 && Math.abs(adx) > Math.abs(ady) * 1.5) { if (adx < 0) nextPage(); else prevPage(); return; }
-        if (Math.abs(adx) < 16 && Math.abs(ady) < 16) applyAdjustAt(pt.clientX, pt.clientY);
-        return;
-      }
+      // 형광펜 범위 조절 모드: 양 끝 네이티브 커서로 끌어 조절한다.
+      // 터치는 네이티브 선택에 맡기고, 페이지 이동·완료는 안내 띠의 버튼으로 처리.
+      if (adjustHl) return;
       // 본문을 길게 눌러 선택했으면 페이지 이동 대신 형광펜
       if (hasSelection()) { setTimeout(onSelectionHighlight, 10); return; }
       // 기존 형광펜을 탭하면 편집
@@ -357,7 +353,8 @@
   // ───────── 형광펜 (길게 눌러 선택 → 바로 칠하기) ─────────
   let defaultHlColor = HL_COLORS[0].id;
   let hlAlpha = 100; // 형광펜 진하기(%) — 100이면 불투명, 낮을수록 투명
-  let adjustHl = null; // 형광펜 범위 조절 중: { id, edge: 'start'|'end' }
+  let adjustHl = null;   // 형광펜 범위 조절 중: { id }
+  let adjustRange = null; // 조절 중 마지막으로 잡힌 선택 범위(글로벌 오프셋) { start, end }
   async function loadHlColor() {
     defaultHlColor = await DB.getSetting('hlColor', HL_COLORS[0].id);
     hlAlpha = clamp(parseInt(await DB.getSetting('hlAlpha', 100), 10) || 100, 20, 100);
@@ -444,12 +441,11 @@
       <div class="hl-colors"></div>
       <textarea class="hl-note" placeholder="메모 (선택)">${existing ? esc(existing.note || '') : ''}</textarea>
       ${existing ? `<div class="hl-adjust-row">
-        <span class="muted">범위 조절 (다음 페이지까지 이어 칠하기)</span>
+        <span class="muted">양 끝 커서를 끌어 형광펜 범위를 늘리거나 줄여요. 페이지를 넘겨 이어 칠할 수도 있어요.</span>
         <div class="hl-adjust-btns">
-          <button type="button" class="hl-adjust-btn" data-edge="start">⟵ 시작점 옮기기</button>
-          <button type="button" class="hl-adjust-btn" data-edge="end">끝점 옮기기 ⟶</button>
+          <button type="button" class="hl-adjust-btn" id="hl-adjust-go">✋ 범위 조절</button>
         </div></div>` : ''}`;
-    if (existing) body.querySelectorAll('.hl-adjust-btn').forEach((b) => b.onclick = () => { App.closeModal(); startAdjust(existing, b.dataset.edge); });
+    if (existing) { const ab = body.querySelector('#hl-adjust-go'); if (ab) ab.onclick = () => { App.closeModal(); startAdjust(existing); }; }
     const colorWrap = body.querySelector('.hl-colors');
     let chosen = existing ? existing.color : defaultHlColor;
     HL_COLORS.forEach((c) => {
@@ -474,15 +470,17 @@
     renderWindow(curWin, globalTop());
   }
 
-  // ───────── 형광펜 범위 조절 (시작/끝점을 탭으로 옮김 · 다음 페이지까지 이어 칠하기) ─────────
-  function startAdjust(h, edge) {
-    adjustHl = { id: h.id, edge };
-    const sel = window.getSelection(); if (sel) sel.removeAllRanges();
+  // ───────── 형광펜 범위 조절 (양 끝 네이티브 커서로 끌어 늘리기/줄이기 · 페이지 넘겨 이어 칠하기) ─────────
+  function startAdjust(h) {
+    adjustHl = { id: h.id };
+    adjustRange = { start: h.start, end: h.end };
     toggleMenu(false);
     showAdjustBanner();
+    // 현재 형광펜 범위를 네이티브 선택으로 띄운다 → 안드로이드 양끝 커서가 나타난다.
+    setTimeout(() => selectRange(h.start, h.end), 80);
   }
   function endAdjust() {
-    adjustHl = null;
+    adjustHl = null; adjustRange = null;
     const el = document.getElementById('adjust-banner');
     if (el) el.classList.add('hidden');
   }
@@ -495,40 +493,73 @@
     }
     el.classList.remove('hidden');
     el.innerHTML = `
-      <div class="ab-left">
-        <button class="ab-edge${adjustHl.edge === 'start' ? ' on' : ''}" data-edge="start">시작점</button>
-        <button class="ab-edge${adjustHl.edge === 'end' ? ' on' : ''}" data-edge="end">끝점</button>
-        <span class="ab-hint">옮길 위치를 탭 · 좌우로 넘겨 다음 페이지</span>
-      </div>
-      <button class="ab-done" id="adjust-done">완료</button>`;
-    el.querySelectorAll('.ab-edge').forEach((b) => b.onclick = () => {
-      if (!adjustHl) return;
-      adjustHl.edge = b.dataset.edge;
-      el.querySelectorAll('.ab-edge').forEach((x) => x.classList.toggle('on', x === b));
-    });
-    el.querySelector('#adjust-done').onclick = endAdjust;
+      <span class="ab-hint">양 끝 커서를 끌어 범위 조절</span>
+      <div class="ab-nav">
+        <button class="ab-pg" id="adjust-prev" title="이전 페이지">◀</button>
+        <button class="ab-pg" id="adjust-next" title="다음 페이지">▶</button>
+        <button class="ab-done" id="adjust-done">완료</button>
+      </div>`;
+    el.querySelector('#adjust-prev').onclick = () => { prevPage(); setTimeout(reselectAdjust, 60); };
+    el.querySelector('#adjust-next').onclick = () => { nextPage(); setTimeout(reselectAdjust, 60); };
+    el.querySelector('#adjust-done').onclick = commitAdjust;
   }
-  function caretOffsetAt(clientX, clientY) {
-    let range = null;
-    if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(clientX, clientY);
-    else if (document.caretPositionFromPoint) {
-      const c = document.caretPositionFromPoint(clientX, clientY);
-      if (c) { range = document.createRange(); range.setStart(c.offsetNode, c.offset); }
+  function reselectAdjust() { if (adjustHl && adjustRange) selectRange(adjustRange.start, adjustRange.end); }
+
+  // 글로벌 오프셋 → 현재 렌더된 DOM 안의 (텍스트노드, 오프셋) 지점
+  function offsetToDomPoint(globalOffset) {
+    const c = content(); if (!c) return null;
+    const els = c.querySelectorAll('.para');
+    let target = null;
+    for (const p of els) {
+      const start = parseInt(p.dataset.start, 10);
+      const len = p.textContent.length;
+      if (globalOffset >= start && globalOffset <= start + len) { target = p; break; }
+      if (start <= globalOffset) target = p; else break;
     }
-    if (!range) return null;
-    return pointToOffset(range.startContainer, range.startOffset);
+    if (!target) return null;
+    const start = parseInt(target.dataset.start, 10);
+    const local = clamp(globalOffset - start, 0, target.textContent.length);
+    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
+    let acc = 0, node;
+    while ((node = walker.nextNode())) {
+      const l = node.nodeValue.length;
+      if (acc + l >= local) return { node, offset: local - acc };
+      acc += l;
+    }
+    return { node: target, offset: target.childNodes.length };
   }
-  async function applyAdjustAt(clientX, clientY) {
-    if (!adjustHl) return;
-    const h = highlightsCache.find((x) => x.id === adjustHl.id);
-    if (!h) { endAdjust(); return; }
-    const off = caretOffsetAt(clientX, clientY);
-    if (off == null) return;
-    if (adjustHl.edge === 'start') h.start = clamp(off, 0, h.end - 1);
-    else h.end = clamp(off, h.start + 1, text.length);
-    h.anchor = Highlights.makeAnchor(text, h.start, h.end); // 새 범위로 앵커 갱신(파일 바뀌어도 재연결되게)
-    h.approx = false;
-    await DB.put('highlights', h);
+  function selectRange(gs, ge) {
+    const a = offsetToDomPoint(gs), b = offsetToDomPoint(ge);
+    if (!a || !b) return;
+    try {
+      const r = document.createRange();
+      r.setStart(a.node, a.offset); r.setEnd(b.node, b.offset);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(r);
+    } catch (e) { /* 범위가 현재 창에 없으면 무시 */ }
+  }
+  // 사용자가 커서를 끌어 바뀐 선택을 글로벌 오프셋으로 기억해 둔다(완료 시 저장).
+  function captureAdjustSelection() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    const r = sel.getRangeAt(0);
+    const a = pointToOffset(r.startContainer, r.startOffset);
+    const b = pointToOffset(r.endContainer, r.endOffset);
+    if (a == null || b == null) return;
+    const s = Math.min(a, b), e = Math.max(a, b);
+    if (e - s >= 1) adjustRange = { start: s, end: e };
+  }
+  async function commitAdjust() {
+    const h = adjustHl && highlightsCache.find((x) => x.id === adjustHl.id);
+    if (h && adjustRange && adjustRange.end - adjustRange.start >= 1 &&
+        (adjustRange.start !== h.start || adjustRange.end !== h.end)) {
+      h.start = adjustRange.start; h.end = adjustRange.end;
+      h.anchor = Highlights.makeAnchor(text, h.start, h.end); // 새 범위로 앵커 갱신(파일 바뀌어도 재연결되게)
+      h.approx = false;
+      await DB.put('highlights', h);
+    }
+    const sel = window.getSelection(); if (sel) sel.removeAllRanges();
+    endAdjust();
     renderWindow(curWin, globalTop());
   }
 
@@ -738,6 +769,7 @@
     let selTimer = null;
     document.addEventListener('selectionchange', () => {
       if (!isActive()) return;
+      if (adjustHl) { captureAdjustSelection(); return; } // 조절 중엔 새 형광펜 대신 범위만 기억
       clearTimeout(selTimer);
       selTimer = setTimeout(() => { if (hasSelection()) onSelectionHighlight(); }, 450);
     });

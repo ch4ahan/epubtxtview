@@ -204,16 +204,15 @@ body {
   padding: 10px 12px; padding-bottom: max(10px, env(safe-area-inset-bottom));
   background: var(--accent); color: #fff; box-shadow: 0 -2px 12px rgba(0,0,0,.28);
 }
-.adjust-banner .ab-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
-.adjust-banner .ab-edge {
+.adjust-banner .ab-hint { font-size: .88rem; font-weight: 600; min-width: 0; }
+.adjust-banner .ab-nav { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.adjust-banner .ab-pg {
   border: 1px solid rgba(255,255,255,.6); background: transparent; color: #fff;
-  font-weight: 700; font-size: .82rem; padding: 6px 10px; border-radius: 16px; cursor: pointer;
+  font-size: 1rem; min-width: 42px; height: 42px; border-radius: 10px; cursor: pointer;
 }
-.adjust-banner .ab-edge.on { background: #fff; color: var(--accent); }
-.adjust-banner .ab-hint { font-size: .74rem; opacity: .92; }
 .adjust-banner .ab-done {
-  border: none; background: rgba(255,255,255,.24); color: #fff; font-weight: 700;
-  padding: 8px 16px; border-radius: 12px; cursor: pointer; flex-shrink: 0;
+  border: none; background: #fff; color: var(--accent); font-weight: 700;
+  padding: 0 18px; height: 42px; border-radius: 10px; cursor: pointer;
 }
 
 /* 설정 패널 */
