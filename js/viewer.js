@@ -126,6 +126,7 @@
 
   // ───────── 창 렌더 + 페이지 분할 ─────────
   function renderWindow(winIndex, keepOffset) {
+    if (typeof hideSelBar === 'function') hideSelBar(); // DOM을 새로 그리면 선택이 사라지므로 선택 바도 닫는다
     curWin = clamp(winIndex, 0, windows.length - 1);
     const w = windows[curWin];
     $page().innerHTML = `<div class="reader-viewport"><div class="reader-content">${buildContent(w.start, w.end)}</div></div>`;
@@ -138,6 +139,8 @@
     const c = content();
     if (!c) return;
     c.style.transform = 'translateY(0)';
+    const vp0 = c.parentElement;
+    if (vp0) vp0.style.height = '';      // 측정하는 동안 클립을 풀어 전체 높이를 잰다
 
     const availW = p.clientWidth - opts.margin * 2;
     const colH = p.clientHeight - opts.margin * 2;
@@ -145,31 +148,46 @@
     c.style.width = availW + 'px';
     colHpx = colH;
 
-    // 페이지 분할: 세로로 쌓인 문단을 '한 화면 높이(colH)' 안에 들어가도록 묶는다.
-    // 페이지 경계는 항상 '문단 사이'에만 생기므로 글줄이 잘리지 않는다.
+    // ── 줄(line) 단위 페이지 분할 ──
+    // 각 '줄'의 아래 경계 y를 모아, 페이지 경계가 항상 '줄과 줄 사이'에만 생기게 한다.
+    //  → 글자가 반으로 잘리지 않고, 내용이 빠짐없이 이어져 문단이 사라지지 않는다.
+    const cTop = c.getBoundingClientRect().top;
+    const contentH = c.scrollHeight;
     const els = c.querySelectorAll('.para');
-    pageTops = [0];
-    let curTop = 0;
+    const lineBottoms = [];
     els.forEach((el) => {
-      const top = el.offsetTop;
-      const bottom = top + el.offsetHeight;
-      if (bottom - curTop > colH + 1) {
-        let newTop = top > curTop ? top : curTop + colH; // 한 문단이 화면보다 크면 강제로 끊음
-        pageTops.push(newTop);
-        curTop = newTop;
-        while (bottom - curTop > colH + 1) { curTop += colH; pageTops.push(curTop); }
-      }
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const rects = range.getClientRects();
+      for (let i = 0; i < rects.length; i++) lineBottoms.push(rects[i].bottom - cTop);
+      lineBottoms.push(el.offsetTop + el.offsetHeight);   // 문단 끝(아래 여백 포함)도 끊을 수 있는 지점
     });
+    lineBottoms.sort((a, b) => a - b);
+
+    pageTops = [0];
+    let pageTop = 0, guard = 0;
+    while (pageTop + colH < contentH - 1 && guard++ < 100000) {
+      let next = pageTop;
+      for (let i = 0; i < lineBottoms.length; i++) {
+        const lb = lineBottoms[i];
+        if (lb <= pageTop + 0.5) continue;
+        if (lb <= pageTop + colH + 1) next = lb;   // 이 페이지에 들어가는 마지막 줄의 아래
+        else break;
+      }
+      if (next <= pageTop) next = pageTop + colH;   // 한 줄이 화면보다 큰 극단적 경우에만 강제 분할
+      pageTops.push(next);
+      pageTop = next;
+    }
     winPages = pageTops.length;
 
-    // 각 페이지의 실제 높이 = 다음 페이지 시작 - 이 페이지 시작 (마지막 페이지는 한 화면).
-    // 뷰포트를 이 높이로 잘라서, 다음 페이지 첫 문단이 현재 페이지 아래로 새어 나오지 않게 한다.
+    // 각 페이지의 실제 높이(다음 페이지 시작까지). 뷰포트를 이 높이로 잘라 다음 줄이 새지 않게 한다.
     pageHeights = [];
     for (let i = 0; i < pageTops.length; i++) {
-      pageHeights.push(i + 1 < pageTops.length ? pageTops[i + 1] - pageTops[i] : colH);
+      const h = (i + 1 < pageTops.length ? pageTops[i + 1] : contentH) - pageTops[i];
+      pageHeights.push(clamp(h, 1, colH));
     }
 
-    // 각 문단이 속한 페이지를 미리 계산
+    // 각 문단이 '시작'하는 페이지(목차·검색·이어보기 이동용)
     paras = [];
     els.forEach((el) => {
       const top = el.offsetTop;
@@ -334,8 +352,8 @@
       // 형광펜 범위 조절 모드: 양 끝 네이티브 커서로 끌어 조절한다.
       // 터치는 네이티브 선택에 맡기고, 페이지 이동·완료는 안내 띠의 버튼으로 처리.
       if (adjustHl) return;
-      // 본문을 길게 눌러 선택했으면 페이지 이동 대신 형광펜
-      if (hasSelection()) { setTimeout(onSelectionHighlight, 10); return; }
+      // 글자를 선택한 상태면 페이지 이동을 하지 않는다(선택 바에서 '형광펜'을 눌러 칠함).
+      if (hasSelection() || pendingSel) return;
       // 기존 형광펜을 탭하면 편집
       const markEl = e.target && e.target.closest ? e.target.closest('mark.hl') : null;
       if (markEl) { const h = highlightsCache.find((x) => x.id === markEl.dataset.id); if (h) { openHighlightDialog(h.start, h.end, h); return; } }
@@ -352,12 +370,13 @@
 
   // ───────── 형광펜 (길게 눌러 선택 → 바로 칠하기) ─────────
   let defaultHlColor = HL_COLORS[0].id;
-  let hlAlpha = 100; // 형광펜 진하기(%) — 100이면 불투명, 낮을수록 투명
+  let hlAlpha = 55; // 형광펜 진하기(%) — 낮을수록 연함. 기본은 은은하게.
   let adjustHl = null;   // 형광펜 범위 조절 중: { id }
   let adjustRange = null; // 조절 중 마지막으로 잡힌 선택 범위(글로벌 오프셋) { start, end }
+  let pendingSel = null;  // 선택만 해두고 아직 형광펜을 누르지 않은 범위 { start, end }
   async function loadHlColor() {
     defaultHlColor = await DB.getSetting('hlColor', HL_COLORS[0].id);
-    hlAlpha = clamp(parseInt(await DB.getSetting('hlAlpha', 100), 10) || 100, 20, 100);
+    hlAlpha = clamp(parseInt(await DB.getSetting('hlAlpha', 55), 10) || 55, 15, 100);
   }
   function applyHlAlpha() { $page().style.setProperty('--hl-pct', hlAlpha + '%'); }
   function colorOf(id) { return (HL_COLORS.find((x) => x.id === id) || HL_COLORS[0]).color; }
@@ -367,7 +386,7 @@
       <p class="muted">본문을 길게 눌러 문장을 선택하면 이 색으로 바로 칠해져요.</p>
       <div class="hl-colors"></div>
       <label class="hl-alpha-row">투명도(진하기) <output>${hlAlpha}%</output>
-        <input type="range" min="20" max="100" step="5" value="${hlAlpha}" id="hl-alpha"></label>
+        <input type="range" min="15" max="100" step="5" value="${hlAlpha}" id="hl-alpha"></label>
       <div class="hl-preview" style="--hl:${colorOf(defaultHlColor)}; --hl-pct:${hlAlpha}%"><mark class="hl">미리보기 형광펜이에요</mark></div>`;
     const wrap = body.querySelector('.hl-colors');
     const preview = body.querySelector('.hl-preview');
@@ -403,35 +422,81 @@
     range.setEnd(node, offsetInNode);
     return base + range.toString().length;
   }
-  async function onSelectionHighlight() {
-    if (adjustHl) return;            // 범위 조절 중에는 새 형광펜을 만들지 않는다
+  // 선택 범위(글로벌 오프셋)를 읽어온다. 없으면 null.
+  function selectionOffsets() {
     const sel = window.getSelection();
-    if (!hasSelection()) return;
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
     const r = sel.getRangeAt(0);
     const a = pointToOffset(r.startContainer, r.startOffset);
     const b = pointToOffset(r.endContainer, r.endOffset);
-    if (a == null || b == null) return;
-    let s = Math.min(a, b), eo = Math.max(a, b);
+    if (a == null || b == null) return null;
+    const s = Math.min(a, b), e = Math.max(a, b);
+    if (e - s < 1) return null;
+    return { start: s, end: e };
+  }
+  // 실제로 형광펜을 만든다(겹치면 하나로 합침).
+  async function createHighlight(s, eo, colorId) {
     if (eo - s < 1) return;
-    // 겹치는 기존 형광펜이 있으면 새로 쌓지 않고 '하나로 합친다'.
-    //  - 드래그 도중 selectionchange가 여러 번 불려도 형광펜이 중복 생성되지 않는다(복사처럼 보이던 문제 해결).
-    //  - 손잡이를 끌어 범위를 넓히면 자연스럽게 확장된다.
     const overlapping = highlightsCache.filter((x) => x.status === 'linked' && x.start < eo && x.end > s);
-    let color = defaultHlColor, note = '';
+    let color = colorId || defaultHlColor, note = '';
     if (overlapping.length) {
-      // 이미 선택 구간을 완전히 덮는 형광펜이 있으면 아무것도 하지 않는다.
-      if (overlapping.some((o) => o.start <= s && o.end >= eo)) { sel.removeAllRanges(); return; }
-      for (const o of overlapping) { s = Math.min(s, o.start); eo = Math.max(eo, o.end); if (o.note) note = o.note; color = o.color; }
+      for (const o of overlapping) { s = Math.min(s, o.start); eo = Math.max(eo, o.end); if (o.note) note = o.note; }
       for (const o of overlapping) { await DB.del('highlights', o.id); }
       highlightsCache = highlightsCache.filter((x) => !overlapping.includes(x));
     }
-    sel.removeAllRanges();   // 선택 해제 → 안드로이드 기본 선택 메뉴도 사라짐
-    // 바로 칠하기: 기본색으로 즉시 형광펜 생성 (색·메모 수정은 형광펜을 탭)
     const h = { id: Highlights.uid(), bookId: book.id, color, note, anchor: Highlights.makeAnchor(text, s, eo), start: s, end: eo, status: 'linked', createdAt: Date.now() };
     await DB.put('highlights', h);
     highlightsCache.push(h);
     renderWindow(curWin, globalTop());
-    App.toast('형광펜 칠함 · 탭하면 색/메모 편집');
+  }
+
+  // ── 선택 액션 바: 글자를 선택(커서로 범위 조절)하면 아래에 떠서, '형광펜'을 눌러야 칠해진다 ──
+  let selBarColor = null;
+  function showSelBar() {
+    let el = document.getElementById('sel-bar');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'sel-bar'; el.className = 'sel-bar';
+      document.getElementById('screen-reader').appendChild(el);
+    }
+    if (el.dataset.built !== '1') {
+      selBarColor = selBarColor || defaultHlColor;
+      const dots = HL_COLORS.map((c) => `<button class="sel-dot${c.id === selBarColor ? ' on' : ''}" data-c="${c.id}" style="background:${c.color}" title="${c.label}"></button>`).join('');
+      el.innerHTML = `<div class="sel-dots">${dots}</div><button class="sel-apply">🖊 형광펜</button>`;
+      // pointerdown + preventDefault: 버튼을 눌러도 선택이 풀리지 않게(선택 보존).
+      el.querySelectorAll('.sel-dot').forEach((d) => d.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        selBarColor = d.dataset.c;
+        el.querySelectorAll('.sel-dot').forEach((x) => x.classList.toggle('on', x === d));
+      }));
+      el.querySelector('.sel-apply').addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        applyPendingHighlight();
+      });
+      el.dataset.built = '1';
+    }
+    el.classList.remove('hidden');
+  }
+  function hideSelBar() {
+    const el = document.getElementById('sel-bar');
+    if (el) el.classList.add('hidden');
+    pendingSel = null;
+  }
+  async function applyPendingHighlight() {
+    const range = pendingSel;
+    const sel = window.getSelection(); if (sel) sel.removeAllRanges();
+    hideSelBar();
+    if (!range) return;
+    await createHighlight(range.start, range.end, selBarColor || defaultHlColor);
+    App.toast('형광펜을 칠했어요');
+  }
+  // 선택이 바뀔 때: 조절 모드가 아니면 '선택 액션 바'를 띄우고 범위를 기억한다(자동으로 칠하지 않음).
+  function onSelectionChanged() {
+    if (!isActive()) return;
+    if (adjustHl) { captureAdjustSelection(); return; }
+    const off = selectionOffsets();
+    if (off) { pendingSel = off; showSelBar(); }
+    else if (pendingSel) hideSelBar();
   }
   function openHighlightDialog(start, end, existing) {
     const quote = text.slice(start, end);
@@ -472,6 +537,7 @@
 
   // ───────── 형광펜 범위 조절 (양 끝 네이티브 커서로 끌어 늘리기/줄이기 · 페이지 넘겨 이어 칠하기) ─────────
   function startAdjust(h) {
+    hideSelBar();
     adjustHl = { id: h.id };
     adjustRange = { start: h.start, end: h.end };
     toggleMenu(false);
@@ -737,7 +803,7 @@
 
   function close() {
     openToken++; // 진행 중인 open이 있으면 취소
-    endAdjust();
+    endAdjust(); hideSelBar();
     if (book) { persistPosition(); DB.put('books', book); }
     toggleMenu(false);
     text = ''; windows = []; paras = [];
@@ -766,13 +832,7 @@
     });
 
     // 길게 눌러 텍스트를 선택하면(안드로이드 기본 선택 메뉴가 떠도) 잠시 후 자동으로 형광펜 적용
-    let selTimer = null;
-    document.addEventListener('selectionchange', () => {
-      if (!isActive()) return;
-      if (adjustHl) { captureAdjustSelection(); return; } // 조절 중엔 새 형광펜 대신 범위만 기억
-      clearTimeout(selTimer);
-      selTimer = setTimeout(() => { if (hasSelection()) onSelectionHighlight(); }, 450);
-    });
+    document.addEventListener('selectionchange', onSelectionChanged);
 
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && book) DB.put('books', book); });
     window.addEventListener('pagehide', () => { if (book) DB.put('books', book); });
